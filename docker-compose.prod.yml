@@ -1,0 +1,107 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: vk-automation-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-vk_automation}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - vk-automation
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: vk-automation-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - vk-automation
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: vk-automation-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-vk_automation}?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      VK_ACCESS_TOKEN: ${VK_ACCESS_TOKEN}
+      VK_API_VERSION: ${VK_API_VERSION:-5.131}
+      VK_AD_ACCOUNT_ID: ${VK_AD_ACCOUNT_ID}
+      JWT_SECRET: ${JWT_SECRET}
+      API_PORT: 4000
+      API_HOST: 0.0.0.0
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_NOTIFICATIONS_ENABLED: ${TELEGRAM_NOTIFICATIONS_ENABLED:-false}
+      SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
+      DEFAULT_RUN_TIME: ${DEFAULT_RUN_TIME:-09:00}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      NODE_ENV: production
+    networks:
+      - vk-automation
+    ports:
+      - "4000:4000"
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: vk-automation-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://api:4000}
+      NODE_ENV: production
+    networks:
+      - vk-automation
+    ports:
+      - "3000:3000"
+
+  nginx:
+    image: nginx:alpine
+    container_name: vk-automation-nginx
+    restart: unless-stopped
+    depends_on:
+      - api
+      - web
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    networks:
+      - vk-automation
+
+networks:
+  vk-automation:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:

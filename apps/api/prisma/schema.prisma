@@ -1,0 +1,160 @@
+// Prisma Schema для VK Automation Platform
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              Int            @id @default(autoincrement())
+  email           String         @unique
+  passwordHash    String         @map("password_hash")
+  telegramChatId  BigInt?        @map("telegram_chat_id")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  vkAccounts      VkAccount[]
+  rules           Rule[]
+  autoDisableRules AutoDisableRule[]
+
+  @@map("users")
+}
+
+model VkAccount {
+  id              Int            @id @default(autoincrement())
+  userId          Int            @map("user_id")
+  name            String         // Название аккаунта (например "Основной", "Клиент 1")
+  accessToken     String         @map("access_token")
+  telegramChatId  String?        @map("telegram_chat_id") // Chat ID для уведомлений по этому кабинету
+  isActive        Boolean        @default(true) @map("is_active")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  adAccounts      AdAccount[]
+  rules           Rule[]
+  autoDisableRules AutoDisableRule[]
+
+  @@map("vk_accounts")
+}
+
+model AdAccount {
+  id              Int            @id @default(autoincrement())
+  vkAccountId     Int            @map("vk_account_id")
+  vkAdAccountId   BigInt         @map("vk_ad_account_id")
+  name            String?
+  isActive        Boolean        @default(true) @map("is_active")
+  createdAt       DateTime       @default(now()) @map("created_at")
+
+  vkAccount       VkAccount      @relation(fields: [vkAccountId], references: [id], onDelete: Cascade)
+  rules           Rule[]
+
+  @@map("ad_accounts")
+}
+
+model Rule {
+  id              Int            @id @default(autoincrement())
+  userId          Int            @map("user_id")
+  vkAccountId     Int?           @map("vk_account_id")
+  name            String
+  adAccountId     Int?           @map("ad_account_id")
+  cplThreshold    Decimal        @default(200.00) @map("cpl_threshold") @db.Decimal(10, 2)
+  minLeads        Int            @default(3) @map("min_leads")
+  copiesCount     Int            @default(3) @map("copies_count")
+  copyBudget      Decimal?       @map("copy_budget") @db.Decimal(10, 2) // Бюджет для копий (null = как у оригинала)
+  runTime         String         @default("09:00") @map("run_time")
+  isActive        Boolean        @default(true) @map("is_active")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vkAccount       VkAccount?     @relation(fields: [vkAccountId], references: [id], onDelete: SetNull)
+  adAccount       AdAccount?     @relation(fields: [adAccountId], references: [id], onDelete: SetNull)
+  executions      RuleExecution[]
+
+  @@map("rules")
+}
+
+model RuleExecution {
+  id              Int            @id @default(autoincrement())
+  ruleId          Int            @map("rule_id")
+  executedAt      DateTime       @default(now()) @map("executed_at")
+  groupsChecked   Int            @map("groups_checked")
+  groupsMatched   Int            @map("groups_matched")
+  copiesCreated   Int            @map("copies_created")
+  status          String         // 'success', 'partial', 'failed'
+  errorMessage    String?        @map("error_message")
+  details         Json?
+
+  rule            Rule           @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  adGroupCopies   AdGroupCopy[]
+
+  @@map("rule_executions")
+}
+
+model AdGroupCopy {
+  id                Int            @id @default(autoincrement())
+  ruleExecutionId   Int            @map("rule_execution_id")
+  originalAdId      BigInt         @map("original_ad_id")
+  copiedAdId        BigInt         @map("copied_ad_id")
+  createdAt         DateTime       @default(now()) @map("created_at")
+
+  ruleExecution     RuleExecution  @relation(fields: [ruleExecutionId], references: [id], onDelete: Cascade)
+
+  @@map("ad_group_copies")
+}
+
+// Правила автоматического отключения объявлений
+model AutoDisableRule {
+  id              Int            @id @default(autoincrement())
+  userId          Int            @map("user_id")
+  vkAccountId     Int            @map("vk_account_id")
+  name            String
+
+  // Тип метрики: cpc, ctr, cpl, conversions
+  metricType      String         @map("metric_type")
+
+  // Оператор сравнения: gte (>=), lte (<=)
+  operator        String         @default("gte")
+
+  // Пороговое значение метрики
+  threshold       Decimal        @db.Decimal(10, 2)
+
+  // Период анализа в днях (1, 3, 7)
+  periodDays      Int            @default(1) @map("period_days")
+
+  // Минимальный потраченный бюджет для срабатывания
+  minSpent        Decimal        @default(0) @map("min_spent") @db.Decimal(10, 2)
+
+  // Время проверки (HH:MM)
+  runTime         String         @default("09:00") @map("run_time")
+
+  isActive        Boolean        @default(true) @map("is_active")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vkAccount       VkAccount      @relation(fields: [vkAccountId], references: [id], onDelete: Cascade)
+  executions      AutoDisableExecution[]
+
+  @@map("auto_disable_rules")
+}
+
+model AutoDisableExecution {
+  id              Int            @id @default(autoincrement())
+  ruleId          Int            @map("rule_id")
+  executedAt      DateTime       @default(now()) @map("executed_at")
+  adsChecked      Int            @map("ads_checked")
+  adsDisabled     Int            @map("ads_disabled")
+  status          String         // 'success', 'failed'
+  errorMessage    String?        @map("error_message")
+  details         Json?          // Детали по каждому отключенному объявлению
+
+  rule            AutoDisableRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@map("auto_disable_executions")
+}
