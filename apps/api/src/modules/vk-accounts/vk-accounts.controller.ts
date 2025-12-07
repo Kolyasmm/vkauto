@@ -73,4 +73,51 @@ export class VkAccountsController {
       throw new BadRequestException('Ошибка отправки сообщения: ' + error.message);
     }
   }
+
+  // ========== SHARING ENDPOINTS ==========
+
+  /**
+   * Получить список пользователей, с которыми расшарен аккаунт
+   */
+  @Get(':id/shared-users')
+  getSharedUsers(@Param('id') id: string, @Request() req) {
+    return this.vkAccountsService.getSharedUsers(+id, req.user.id);
+  }
+
+  /**
+   * Предоставить доступ к аккаунту другому пользователю
+   */
+  @Post(':id/share')
+  shareAccount(
+    @Param('id') id: string,
+    @Body() body: { email: string; canEdit?: boolean },
+    @Request() req,
+  ) {
+    return this.vkAccountsService.shareAccount(+id, req.user.id, body.email, body.canEdit ?? false);
+  }
+
+  /**
+   * Обновить права доступа пользователя
+   */
+  @Put(':id/share/:userId')
+  updateSharePermissions(
+    @Param('id') id: string,
+    @Param('userId') userId: string,
+    @Body() body: { canEdit: boolean },
+    @Request() req,
+  ) {
+    return this.vkAccountsService.updateSharePermissions(+id, req.user.id, +userId, body.canEdit);
+  }
+
+  /**
+   * Отозвать доступ у пользователя
+   */
+  @Delete(':id/share/:userId')
+  revokeAccess(
+    @Param('id') id: string,
+    @Param('userId') userId: string,
+    @Request() req,
+  ) {
+    return this.vkAccountsService.revokeAccess(+id, req.user.id, +userId);
+  }
 }

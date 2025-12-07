@@ -20,6 +20,7 @@ model User {
   vkAccounts      VkAccount[]
   rules           Rule[]
   autoDisableRules AutoDisableRule[]
+  sharedAccounts  VkAccountShare[] // Аккаунты, к которым есть доступ
 
   @@map("users")
 }
@@ -29,6 +30,7 @@ model VkAccount {
   userId          Int            @map("user_id")
   name            String         // Название аккаунта (например "Основной", "Клиент 1")
   accessToken     String         @map("access_token")
+  tokenHash       String         @unique @map("token_hash") // Хеш токена для проверки дубликатов
   telegramChatId  String?        @map("telegram_chat_id") // Chat ID для уведомлений по этому кабинету
   isActive        Boolean        @default(true) @map("is_active")
   createdAt       DateTime       @default(now()) @map("created_at")
@@ -38,8 +40,24 @@ model VkAccount {
   adAccounts      AdAccount[]
   rules           Rule[]
   autoDisableRules AutoDisableRule[]
+  sharedWith      VkAccountShare[] // Пользователи, с которыми расшарен аккаунт
 
   @@map("vk_accounts")
+}
+
+// Таблица для шаринга VK аккаунтов между пользователями
+model VkAccountShare {
+  id              Int            @id @default(autoincrement())
+  vkAccountId     Int            @map("vk_account_id")
+  sharedWithUserId Int           @map("shared_with_user_id")
+  canEdit         Boolean        @default(false) @map("can_edit") // Может редактировать правила
+  createdAt       DateTime       @default(now()) @map("created_at")
+
+  vkAccount       VkAccount      @relation(fields: [vkAccountId], references: [id], onDelete: Cascade)
+  sharedWithUser  User           @relation(fields: [sharedWithUserId], references: [id], onDelete: Cascade)
+
+  @@unique([vkAccountId, sharedWithUserId])
+  @@map("vk_account_shares")
 }
 
 model AdAccount {
@@ -157,4 +175,34 @@ model AutoDisableExecution {
   rule            AutoDisableRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
 
   @@map("auto_disable_executions")
+}
+
+// Задачи ручного масштабирования групп объявлений
+model ScalingTask {
+  id              Int            @id @default(autoincrement())
+  userId          Int            @map("user_id")
+  vkAccountId     Int            @map("vk_account_id")
+
+  // Исходная группа объявлений
+  sourceAdGroupId BigInt         @map("source_ad_group_id")
+  sourceAdGroupName String?      @map("source_ad_group_name")
+
+  // Количество копий для создания
+  copiesCount     Int            @map("copies_count")
+
+  // Созданные копии (массив ID)
+  createdCopies   Json?          @map("created_copies") // [{ id: number, name: string }]
+
+  // Статус задачи
+  status          String         @default("pending") // pending, running, completed, failed
+  progress        Int            @default(0) // Прогресс в процентах
+  copiesCreated   Int            @default(0) @map("copies_created")
+
+  errorMessage    String?        @map("error_message")
+
+  createdAt       DateTime       @default(now()) @map("created_at")
+  startedAt       DateTime?      @map("started_at")
+  completedAt     DateTime?      @map("completed_at")
+
+  @@map("scaling_tasks")
 }

@@ -10,7 +10,7 @@ export class UpdateAutoDisableRuleDto {
   metricType?: string;
 
   @IsOptional()
-  @IsIn(['gte', 'lte'])
+  @IsIn(['gte', 'lt'])
   operator?: string;
 
   @IsOptional()

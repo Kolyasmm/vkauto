@@ -191,8 +191,8 @@ export class AutoDisableService {
         let shouldDisable = false;
         if (rule.operator === 'gte') {
           shouldDisable = metricValue >= threshold;
-        } else if (rule.operator === 'lte') {
-          shouldDisable = metricValue <= threshold;
+        } else if (rule.operator === 'lt') {
+          shouldDisable = metricValue < threshold;
         }
 
         if (shouldDisable) {
@@ -295,7 +295,7 @@ export class AutoDisableService {
   getOperators() {
     return [
       { value: 'gte', label: '≥ (больше или равно)' },
-      { value: 'lte', label: '≤ (меньше или равно)' },
+      { value: 'lt', label: '< (меньше)' },
     ];
   }
 }

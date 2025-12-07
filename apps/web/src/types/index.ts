@@ -5,7 +5,20 @@ export interface VkAccount {
   telegramChatId?: string | null
   createdAt: string
   updatedAt: string
-  _count?: { rules: number }
+  _count?: { rules: number; sharedWith?: number }
+  // Sharing fields
+  isOwner?: boolean
+  isShared?: boolean
+  canEdit?: boolean
+  ownerEmail?: string
+  sharedCount?: number
+}
+
+export interface SharedUser {
+  userId: number
+  email: string
+  canEdit: boolean
+  sharedAt: string
 }
 
 export interface Rule {

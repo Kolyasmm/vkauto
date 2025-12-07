@@ -10,7 +10,7 @@ export class CreateAutoDisableRuleDto {
   @IsIn(['cpc', 'ctr', 'cpl', 'conversions'])
   metricType: string;
 
-  @IsIn(['gte', 'lte'])
+  @IsIn(['gte', 'lt'])
   operator: string;
 
   @IsNumber()

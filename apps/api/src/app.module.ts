@@ -11,6 +11,7 @@ import { SchedulerModule } from './modules/scheduler/scheduler.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { VkAccountsModule } from './modules/vk-accounts/vk-accounts.module';
 import { AutoDisableModule } from './modules/auto-disable/auto-disable.module';
+import { ScalingModule } from './modules/scaling/scaling.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { AutoDisableModule } from './modules/auto-disable/auto-disable.module';
     NotificationsModule,
     VkAccountsModule,
     AutoDisableModule,
+    ScalingModule,
   ],
 })
 export class AppModule {}

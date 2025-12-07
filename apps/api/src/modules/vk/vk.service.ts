@@ -169,6 +169,28 @@ export class VkService {
   }
 
   /**
+   * Получить группу объявлений по ID напрямую
+   */
+  async getAdGroupById(adGroupId: number): Promise<AdGroup | null> {
+    this.logger.log(`Получение группы объявлений по ID ${adGroupId}`);
+
+    try {
+      const response = await this.callApi<AdGroup>(
+        `ad_groups/${adGroupId}.json`,
+        { fields: 'id,name,status,package_id,ad_plan_id' },
+      );
+
+      return response;
+    } catch (error) {
+      // Если группа не найдена (404) - возвращаем null
+      if (error.response?.status === 404) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Получить список групп объявлений (одна страница)
    */
   async getAdGroups(adPlanId?: number, limit = 100, offset = 0, status?: string): Promise<AdGroup[]> {

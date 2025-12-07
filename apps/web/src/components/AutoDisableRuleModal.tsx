@@ -33,7 +33,7 @@ const metricTypes = [
 
 const operators = [
   { value: 'gte', label: '≥ больше или равно' },
-  { value: 'lte', label: '≤ меньше или равно' },
+  { value: 'lt', label: '< меньше' },
 ]
 
 const periods = [
@@ -95,7 +95,7 @@ export default function AutoDisableRuleModal({ rule, onClose, onSuccess }: AutoD
       metricType,
       threshold: metric?.defaultThreshold || 0,
       // Меняем оператор в зависимости от метрики
-      operator: metricType === 'conversions' || metricType === 'ctr' ? 'lte' : 'gte',
+      operator: metricType === 'conversions' || metricType === 'ctr' ? 'lt' : 'gte',
     })
   }
 
@@ -233,31 +233,39 @@ export default function AutoDisableRuleModal({ rule, onClose, onSuccess }: AutoD
             </p>
           </div>
 
-          {/* Active Toggle */}
-          <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-            <div>
-              <p className="font-medium text-gray-900">Активно</p>
-              <p className="text-sm text-gray-500">Правило проверяется каждые 10 минут</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setFormData({ ...formData, isActive: !formData.isActive })}
-              className={`relative w-14 h-8 rounded-full transition-colors ${
-                formData.isActive ? 'bg-primary-600' : 'bg-gray-200'
-              }`}
-            >
-              <span
-                className={`absolute top-1 w-6 h-6 bg-white rounded-full shadow transition-transform ${
-                  formData.isActive ? 'translate-x-7' : 'translate-x-1'
+          {/* Active Toggle - only show when editing */}
+          {rule ? (
+            <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+              <div>
+                <p className="font-medium text-gray-900">Активно</p>
+                <p className="text-sm text-gray-500">Правило проверяется каждые 10 минут</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, isActive: !formData.isActive })}
+                className={`relative w-14 h-8 rounded-full transition-colors ${
+                  formData.isActive ? 'bg-primary-600' : 'bg-gray-200'
                 }`}
-              />
-            </button>
-          </div>
+              >
+                <span
+                  className={`absolute top-1 w-6 h-6 bg-white rounded-full shadow transition-transform ${
+                    formData.isActive ? 'translate-x-7' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+          ) : (
+            <div className="p-4 bg-green-50 rounded-lg">
+              <p className="text-sm text-green-800">
+                Правило будет сразу активно и начнет проверяться каждые 10 минут после создания.
+              </p>
+            </div>
+          )}
 
           {/* Rule Preview */}
           <div className="p-4 bg-blue-50 rounded-lg">
             <p className="text-sm text-blue-800">
-              <strong>Правило:</strong> Если {selectedMetric?.label} {formData.operator === 'gte' ? '≥' : '≤'} {formData.threshold}{selectedMetric?.unit} за {periods.find(p => p.value === formData.periodDays)?.label.toLowerCase()} и расход ≥ {formData.minSpent}₽, то объявление будет отключено.
+              <strong>Правило:</strong> Если {selectedMetric?.label} {formData.operator === 'gte' ? '≥' : '<'} {formData.threshold}{selectedMetric?.unit} за {periods.find(p => p.value === formData.periodDays)?.label.toLowerCase()} и расход ≥ {formData.minSpent}₽, то объявление будет отключено.
             </p>
           </div>
 

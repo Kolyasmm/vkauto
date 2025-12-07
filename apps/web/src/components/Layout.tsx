@@ -14,7 +14,8 @@ import {
   Plus,
   Trash2,
   Loader2,
-  Power
+  Power,
+  Copy
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '@/contexts/AuthContext'
@@ -26,6 +27,7 @@ const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { name: 'Правила', href: '/rules', icon: Play },
   { name: 'Автоотключение', href: '/auto-disable', icon: Power },
+  { name: 'Масштабирование', href: '/scaling', icon: Copy },
   { name: 'История', href: '/history', icon: FileText },
   { name: 'Настройки', href: '/settings', icon: Settings },
 ]
@@ -114,25 +116,32 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                           }}
                           className="flex-1 text-left truncate"
                         >
-                          {account.name}
+                          <span>{account.name}</span>
+                          {account.isShared && (
+                            <span className="ml-1 text-xs text-gray-400">
+                              (от {account.ownerEmail})
+                            </span>
+                          )}
                         </button>
                         {account._count && (
                           <span className="text-xs text-gray-400 mr-2">
                             {account._count.rules} правил
                           </span>
                         )}
-                        <button
-                          onClick={(e) => handleDeleteAccount(account.id, e)}
-                          disabled={deletingAccountId === account.id}
-                          className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded opacity-0 group-hover:opacity-100 transition-all disabled:opacity-50"
-                          title="Удалить аккаунт"
-                        >
-                          {deletingAccountId === account.id ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <Trash2 className="w-4 h-4" />
-                          )}
-                        </button>
+                        {account.isOwner !== false && (
+                          <button
+                            onClick={(e) => handleDeleteAccount(account.id, e)}
+                            disabled={deletingAccountId === account.id}
+                            className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded opacity-0 group-hover:opacity-100 transition-all disabled:opacity-50"
+                            title="Удалить аккаунт"
+                          >
+                            {deletingAccountId === account.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-4 h-4" />
+                            )}
+                          </button>
+                        )}
                       </div>
                     ))
                   )}
