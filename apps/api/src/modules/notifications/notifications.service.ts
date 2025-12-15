@@ -142,10 +142,13 @@ VK Automation Platform успешно подключен к вашему Telegra
       adsChecked: number;
       adsDisabled: number;
       status: string;
-      details?: { adId: number; name: string; metricValue: number; threshold: number }[];
+      details?: { adId: number; name: string; spent: number; metricValue: number; threshold: number; metricType: string }[];
     },
   ): Promise<void> {
     const statusEmoji = result.status === 'success' ? '🔴' : '❌';
+
+    // Общая сумма потраченного бюджета на отключённых объявлениях
+    const totalSpent = result.details?.reduce((sum, ad) => sum + (ad.spent || 0), 0) || 0;
 
     let message = `
 ${statusEmoji} <b>Автоотключение объявлений</b>
@@ -156,12 +159,15 @@ ${statusEmoji} <b>Автоотключение объявлений</b>
 <b>📊 Статистика:</b>
 • Проверено объявлений: ${result.adsChecked}
 • Отключено: ${result.adsDisabled}
+• Потрачено на отключённых: ${totalSpent.toFixed(2)}₽
 `;
 
     if (result.details && result.details.length > 0) {
       message += '\n<b>Отключённые объявления:</b>\n';
       for (const ad of result.details.slice(0, 10)) {
-        message += `• ${ad.name} (ID: ${ad.adId}) - значение: ${ad.metricValue}, порог: ${ad.threshold}\n`;
+        const metricLabel = this.getMetricLabel(ad.metricType);
+        message += `• ${ad.name} (ID: ${ad.adId})\n`;
+        message += `  💰 Потрачено: ${ad.spent.toFixed(2)}₽ | ${metricLabel}: ${ad.metricValue} (порог: ${ad.threshold})\n`;
       }
       if (result.details.length > 10) {
         message += `<i>...и ещё ${result.details.length - 10}</i>\n`;
@@ -171,5 +177,23 @@ ${statusEmoji} <b>Автоотключение объявлений</b>
     message += `\n<i>${new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })} МСК</i>`;
 
     await this.sendMessage(chatId, message);
+  }
+
+  /**
+   * Получить человекочитаемое название метрики
+   */
+  private getMetricLabel(metricType: string): string {
+    switch (metricType) {
+      case 'clicks':
+        return 'Кликов';
+      case 'goals':
+        return 'Результатов';
+      case 'ctr':
+        return 'CTR';
+      case 'cpl':
+        return 'CPL';
+      default:
+        return metricType;
+    }
   }
 }

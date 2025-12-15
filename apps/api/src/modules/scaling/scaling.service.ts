@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { VkService } from '../vk/vk.service';
 import { VkAccountsService } from '../vk-accounts/vk-accounts.service';
@@ -15,7 +15,7 @@ interface CreatedCopy {
 }
 
 @Injectable()
-export class ScalingService {
+export class ScalingService implements OnModuleInit {
   private readonly logger = new Logger(ScalingService.name);
   private runningTasks: Set<number> = new Set();
   private taskQueue: number[] = [];
@@ -26,6 +26,47 @@ export class ScalingService {
     private vkService: VkService,
     private vkAccountsService: VkAccountsService,
   ) {}
+
+  /**
+   * При старте сервиса подхватываем зависшие pending/running задачи
+   */
+  async onModuleInit() {
+    this.logger.log('Инициализация ScalingService - проверка зависших задач...');
+
+    try {
+      // Находим все задачи в статусе pending или running
+      const stuckTasks = await this.prisma.scalingTask.findMany({
+        where: {
+          status: { in: ['pending', 'running'] },
+        },
+        orderBy: { createdAt: 'asc' },
+      });
+
+      if (stuckTasks.length > 0) {
+        this.logger.log(`Найдено ${stuckTasks.length} зависших задач, добавляем в очередь`);
+
+        // Сбрасываем статус running -> pending для перезапуска
+        for (const task of stuckTasks) {
+          if (task.status === 'running') {
+            await this.prisma.scalingTask.update({
+              where: { id: task.id },
+              data: { status: 'pending' },
+            });
+          }
+          this.taskQueue.push(task.id);
+        }
+
+        // Запускаем обработку очереди
+        this.processQueue().catch((error) => {
+          this.logger.error(`Ошибка обработки очереди при старте: ${error.message}`);
+        });
+      } else {
+        this.logger.log('Зависших задач не найдено');
+      }
+    } catch (error) {
+      this.logger.error(`Ошибка при проверке зависших задач: ${error.message}`);
+    }
+  }
 
   /**
    * Проверить существование группы объявлений

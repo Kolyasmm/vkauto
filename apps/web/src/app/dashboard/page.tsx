@@ -34,85 +34,85 @@ export default function Dashboard() {
   return (
     <Layout>
       <div className="max-w-7xl">
-        <h1 className="text-3xl font-bold text-gray-900 mb-8">Dashboard</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-4 sm:mb-8">Dashboard</h1>
 
         {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <div className="card">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 mb-4 sm:mb-8">
+          <div className="card p-3 sm:p-4">
             <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 mb-1">Активных правил</p>
-                <p className="text-3xl font-bold text-gray-900">{activeRules.length}</p>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs sm:text-sm text-gray-600 mb-1 truncate">Активных правил</p>
+                <p className="text-xl sm:text-3xl font-bold text-gray-900">{activeRules.length}</p>
               </div>
-              <div className="p-3 bg-primary-100 rounded-lg">
-                <Play className="w-6 h-6 text-primary-600" />
+              <div className="p-2 sm:p-3 bg-primary-100 rounded-lg flex-shrink-0 ml-2">
+                <Play className="w-4 h-4 sm:w-6 sm:h-6 text-primary-600" />
               </div>
             </div>
           </div>
 
-          <div className="card">
+          <div className="card p-3 sm:p-4">
             <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 mb-1">Запусков сегодня</p>
-                <p className="text-3xl font-bold text-gray-900">{todayExecutions}</p>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs sm:text-sm text-gray-600 mb-1 truncate">Запусков сегодня</p>
+                <p className="text-xl sm:text-3xl font-bold text-gray-900">{todayExecutions}</p>
               </div>
-              <div className="p-3 bg-green-100 rounded-lg">
-                <TrendingUp className="w-6 h-6 text-green-600" />
+              <div className="p-2 sm:p-3 bg-green-100 rounded-lg flex-shrink-0 ml-2">
+                <TrendingUp className="w-4 h-4 sm:w-6 sm:h-6 text-green-600" />
               </div>
             </div>
           </div>
 
-          <div className="card">
+          <div className="card p-3 sm:p-4">
             <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 mb-1">Всего запусков</p>
-                <p className="text-3xl font-bold text-gray-900">{totalExecutions}</p>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs sm:text-sm text-gray-600 mb-1 truncate">Всего запусков</p>
+                <p className="text-xl sm:text-3xl font-bold text-gray-900">{totalExecutions}</p>
               </div>
-              <div className="p-3 bg-blue-100 rounded-lg">
-                <CheckCircle className="w-6 h-6 text-blue-600" />
+              <div className="p-2 sm:p-3 bg-blue-100 rounded-lg flex-shrink-0 ml-2">
+                <CheckCircle className="w-4 h-4 sm:w-6 sm:h-6 text-blue-600" />
               </div>
             </div>
           </div>
 
-          <div className="card">
+          <div className="card p-3 sm:p-4">
             <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 mb-1">Создано копий</p>
-                <p className="text-3xl font-bold text-gray-900">{totalCopiesCreated}</p>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs sm:text-sm text-gray-600 mb-1 truncate">Создано копий</p>
+                <p className="text-xl sm:text-3xl font-bold text-gray-900">{totalCopiesCreated}</p>
               </div>
-              <div className="p-3 bg-purple-100 rounded-lg">
-                <Copy className="w-6 h-6 text-purple-600" />
+              <div className="p-2 sm:p-3 bg-purple-100 rounded-lg flex-shrink-0 ml-2">
+                <Copy className="w-4 h-4 sm:w-6 sm:h-6 text-purple-600" />
               </div>
             </div>
           </div>
         </div>
 
         {/* Активные правила */}
-        <div className="card mb-8">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">
+        <div className="card p-3 sm:p-4 mb-4 sm:mb-8">
+          <h2 className="text-lg sm:text-xl font-semibold text-gray-900 mb-3 sm:mb-4">
             Активные правила
           </h2>
 
           {activeRules.length === 0 ? (
-            <p className="text-gray-500 text-center py-8">
+            <p className="text-gray-500 text-center py-6 sm:py-8 text-sm">
               Нет активных правил. Создайте новое правило в разделе &quot;Правила&quot;
             </p>
           ) : (
-            <div className="space-y-4">
+            <div className="space-y-3 sm:space-y-4">
               {activeRules.map((rule) => (
                 <div
                   key={rule.id}
-                  className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+                  className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-3 sm:p-4 bg-gray-50 rounded-lg gap-2 sm:gap-4"
                 >
-                  <div>
-                    <h3 className="font-medium text-gray-900">{rule.name}</h3>
-                    <p className="text-sm text-gray-600 mt-1">
+                  <div className="min-w-0">
+                    <h3 className="font-medium text-gray-900 truncate">{rule.name}</h3>
+                    <p className="text-xs sm:text-sm text-gray-600 mt-1">
                       CPL ≤ {rule.cplThreshold}₽ • Мин. {rule.minLeads} лидов • {rule.copiesCount} копий
                     </p>
                   </div>
-                  <div className="text-right">
-                    <span className="badge badge-success">Активно</span>
-                    <p className="text-sm text-gray-600 mt-1">
+                  <div className="flex items-center justify-between sm:justify-end sm:text-right gap-2 sm:flex-col sm:items-end">
+                    <span className="badge badge-success text-xs">Активно</span>
+                    <p className="text-xs sm:text-sm text-gray-600">
                       Запуск в {rule.runTime}
                     </p>
                   </div>
@@ -123,17 +123,17 @@ export default function Dashboard() {
         </div>
 
         {/* Последние выполнения */}
-        <div className="card">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">
+        <div className="card p-3 sm:p-4">
+          <h2 className="text-lg sm:text-xl font-semibold text-gray-900 mb-3 sm:mb-4">
             Последние выполнения
           </h2>
 
           {!rules || rules.length === 0 ? (
-            <p className="text-gray-500 text-center py-8">
+            <p className="text-gray-500 text-center py-6 sm:py-8 text-sm">
               Нет выполнений
             </p>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-2 sm:space-y-3">
               {rules
                 .flatMap(r => r.executions?.map(e => ({ ...e, ruleName: r.name })) || [])
                 .sort((a, b) => new Date(b.executedAt).getTime() - new Date(a.executedAt).getTime())
@@ -141,19 +141,20 @@ export default function Dashboard() {
                 .map((execution: any) => (
                   <div
                     key={execution.id}
-                    className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+                    className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-3 sm:p-4 bg-gray-50 rounded-lg gap-2"
                   >
-                    <div>
-                      <h3 className="font-medium text-gray-900">
+                    <div className="min-w-0">
+                      <h3 className="font-medium text-gray-900 truncate">
                         {execution.ruleName}
                       </h3>
-                      <p className="text-sm text-gray-600 mt-1">
-                        Проверено: {execution.groupsChecked} • Подошли: {execution.groupsMatched} • Создано: {execution.copiesCreated}
+                      <p className="text-xs sm:text-sm text-gray-600 mt-1">
+                        <span className="hidden sm:inline">Проверено: {execution.groupsChecked} • Подошли: {execution.groupsMatched} • Создано: {execution.copiesCreated}</span>
+                        <span className="sm:hidden">✓{execution.groupsChecked} • ⚡{execution.groupsMatched} • +{execution.copiesCreated}</span>
                       </p>
                     </div>
-                    <div className="text-right">
+                    <div className="flex items-center justify-between sm:justify-end sm:text-right gap-2 sm:flex-col sm:items-end">
                       <span
-                        className={`badge ${
+                        className={`badge text-xs ${
                           execution.status === 'success'
                             ? 'badge-success'
                             : execution.status === 'partial'
@@ -163,7 +164,7 @@ export default function Dashboard() {
                       >
                         {execution.status === 'success' ? 'Успешно' : execution.status === 'partial' ? 'Частично' : 'Ошибка'}
                       </span>
-                      <p className="text-sm text-gray-600 mt-1">
+                      <p className="text-xs sm:text-sm text-gray-600">
                         {format(new Date(execution.executedAt), 'd MMM HH:mm', { locale: ru })}
                       </p>
                     </div>

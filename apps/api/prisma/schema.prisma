@@ -127,26 +127,28 @@ model AdGroupCopy {
 }
 
 // Правила автоматического отключения объявлений
+// Новая логика: "если потрачено >= X И метрика (клики/результаты/CTR) соответствует условию"
 model AutoDisableRule {
   id              Int            @id @default(autoincrement())
   userId          Int            @map("user_id")
   vkAccountId     Int            @map("vk_account_id")
   name            String
 
-  // Тип метрики: cpc, ctr, cpl, conversions
+  // Тип метрики для проверки: clicks, goals (результаты/лиды), ctr
   metricType      String         @map("metric_type")
 
-  // Оператор сравнения: gte (>=), lte (<=)
-  operator        String         @default("gte")
+  // Оператор сравнения для метрики: lt (<), lte (<=), eq (=)
+  operator        String         @default("lt")
 
-  // Пороговое значение метрики
+  // Пороговое значение метрики (клики < 2, результаты < 3, CTR < 0.1)
   threshold       Decimal        @db.Decimal(10, 2)
 
-  // Период анализа в днях (1, 3, 7)
-  periodDays      Int            @default(1) @map("period_days")
+  // ГЛАВНОЕ УСЛОВИЕ: минимальный потраченный бюджет для срабатывания
+  // "если потрачено >= X" - это первичное условие
+  minSpent        Decimal        @default(75) @map("min_spent") @db.Decimal(10, 2)
 
-  // Минимальный потраченный бюджет для срабатывания
-  minSpent        Decimal        @default(0) @map("min_spent") @db.Decimal(10, 2)
+  // Период анализа в днях (1 = сегодня, 3, 7)
+  periodDays      Int            @default(1) @map("period_days")
 
   // Время проверки (HH:MM)
   runTime         String         @default("09:00") @map("run_time")
@@ -175,6 +177,87 @@ model AutoDisableExecution {
   rule            AutoDisableRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
 
   @@map("auto_disable_executions")
+}
+
+// Сохранённые тексты для объявлений (автозалив)
+model AdText {
+  id              Int            @id @default(autoincrement())
+  userId          Int            @map("user_id")
+  name            String         // Название для удобства выбора
+  title           String         // Заголовок объявления
+  text            String         // Основной текст объявления
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  @@map("ad_texts")
+}
+
+// Задачи автозалива кампаний
+model AutoUploadTask {
+  id              Int            @id @default(autoincrement())
+  userId          Int            @map("user_id")
+  vkAccountId     Int            @map("vk_account_id")
+
+  // Название кампании
+  campaignName    String         @map("campaign_name")
+
+  // ID сообщества VK (куда ведём)
+  groupId         BigInt         @map("group_id")
+  groupName       String?        @map("group_name")
+
+  // ID аудитории ретаргетинга (опционально)
+  audienceId      BigInt?        @map("audience_id")
+  audienceName    String?        @map("audience_name")
+
+  // Текст объявления
+  adTextId        Int?           @map("ad_text_id")
+  adTitle         String         @map("ad_title")
+  adText          String         @map("ad_text")
+
+  // Количество креативов (= количество групп объявлений)
+  creativesCount  Int            @map("creatives_count")
+
+  // Созданная кампания
+  createdCampaignId BigInt?      @map("created_campaign_id")
+  createdAdGroups Json?          @map("created_ad_groups") // [{ id, name, adId }]
+
+  // Статус
+  status          String         @default("pending") // pending, uploading_creatives, creating_campaign, completed, failed
+  progress        Int            @default(0)
+  errorMessage    String?        @map("error_message")
+
+  createdAt       DateTime       @default(now()) @map("created_at")
+  startedAt       DateTime?      @map("started_at")
+  completedAt     DateTime?      @map("completed_at")
+
+  @@map("auto_upload_tasks")
+}
+
+// Пользовательские названия для сегментов/аудиторий VK
+// VK API не предоставляет названия, поэтому храним их локально
+model SegmentLabel {
+  id              Int            @id @default(autoincrement())
+  vkAccountId     Int            @map("vk_account_id")
+  segmentId       BigInt         @map("segment_id")  // ID сегмента в VK
+  name            String         // Пользовательское название
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  @@unique([vkAccountId, segmentId])
+  @@map("segment_labels")
+}
+
+// Пользовательские названия для интересов VK
+model InterestLabel {
+  id              Int            @id @default(autoincrement())
+  vkAccountId     Int            @map("vk_account_id")
+  interestId      Int            @map("interest_id")  // ID интереса в VK
+  name            String         // Пользовательское название
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  @@unique([vkAccountId, interestId])
+  @@map("interest_labels")
 }
 
 // Задачи ручного масштабирования групп объявлений

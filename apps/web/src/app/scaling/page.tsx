@@ -235,51 +235,53 @@ export default function ScalingPage() {
   return (
     <Layout>
       <div className="max-w-4xl">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">Ручное масштабирование</h1>
-          <p className="text-gray-500 mt-1">
+        <div className="mb-4 sm:mb-8">
+          <h1 className="text-xl sm:text-3xl font-bold text-gray-900">Ручное масштабирование</h1>
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">
             Создание копий групп объявлений с сохранением всех настроек
           </p>
         </div>
 
         {/* Переключатель режима */}
-        <div className="flex gap-2 mb-6">
+        <div className="flex gap-2 mb-4 sm:mb-6">
           <button
             onClick={() => { setMode('single'); setBatchResult(null) }}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+            className={`flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg transition-colors text-sm sm:text-base ${
               mode === 'single'
                 ? 'bg-primary-600 text-white'
                 : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
             }`}
           >
             <Copy className="w-4 h-4" />
-            Одна группа
+            <span className="hidden xs:inline">Одна группа</span>
+            <span className="xs:hidden">Одна</span>
           </button>
           <button
             onClick={() => { setMode('batch'); setVerifiedGroup(null) }}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+            className={`flex items-center gap-1 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg transition-colors text-sm sm:text-base ${
               mode === 'batch'
                 ? 'bg-primary-600 text-white'
                 : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
             }`}
           >
             <List className="w-4 h-4" />
-            Пакетный режим
+            <span className="hidden xs:inline">Пакетный режим</span>
+            <span className="xs:hidden">Пакет</span>
           </button>
         </div>
 
         {/* Форма создания */}
-        <div className="card mb-8">
+        <div className="card p-3 sm:p-4 mb-4 sm:mb-8">
           {mode === 'single' ? (
             <>
-              <h2 className="text-lg font-semibold mb-4">Создать копии группы</h2>
+              <h2 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4">Создать копии группы</h2>
 
               {/* Шаг 1: Ввод ID группы */}
-              <div className="mb-4">
+              <div className="mb-3 sm:mb-4">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   ID группы объявлений
                 </label>
-                <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-row gap-2">
                   <input
                     type="number"
                     value={adGroupId}
@@ -294,7 +296,7 @@ export default function ScalingPage() {
                   <button
                     onClick={handleVerify}
                     disabled={!adGroupId.trim() || isVerifying}
-                    className="btn-outline flex items-center gap-2"
+                    className="btn-outline flex items-center justify-center gap-2 w-full sm:w-auto"
                   >
                     {isVerifying ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
@@ -315,20 +317,20 @@ export default function ScalingPage() {
               {/* Шаг 2: Верифицированная группа */}
               {verifiedGroup && (
                 <>
-                  <div className="p-4 bg-green-50 border border-green-200 rounded-lg mb-4">
+                  <div className="p-3 sm:p-4 bg-green-50 border border-green-200 rounded-lg mb-3 sm:mb-4">
                     <div className="flex items-center gap-2 text-green-700">
-                      <CheckCircle className="w-5 h-5" />
-                      <span className="font-medium">Группа найдена</span>
+                      <CheckCircle className="w-5 h-5 flex-shrink-0" />
+                      <span className="font-medium text-sm sm:text-base">Группа найдена</span>
                     </div>
-                    <p className="text-green-800 mt-1">
+                    <p className="text-green-800 mt-1 text-sm sm:text-base break-all">
                       <strong>{verifiedGroup.name}</strong> (ID: {verifiedGroup.id})
                     </p>
                   </div>
 
                   {/* Шаг 3: Количество копий */}
-                  <div className="mb-4">
+                  <div className="mb-3 sm:mb-4">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Количество копий (максимум {MAX_COPIES})
+                      Количество копий (макс. {MAX_COPIES})
                     </label>
                     <input
                       type="number"
@@ -336,20 +338,19 @@ export default function ScalingPage() {
                       max={MAX_COPIES}
                       value={copiesCount}
                       onChange={(e) => setCopiesCount(Math.min(MAX_COPIES, Math.max(1, parseInt(e.target.value) || 1)))}
-                      className="input w-32"
+                      className="input w-24 sm:w-32"
                     />
                   </div>
 
                   {/* Предупреждение для большого количества копий */}
                   {copiesCount > WARNING_THRESHOLD && (
-                    <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg mb-4">
+                    <div className="p-3 sm:p-4 bg-yellow-50 border border-yellow-200 rounded-lg mb-3 sm:mb-4">
                       <div className="flex items-start gap-2 text-yellow-700">
                         <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" />
                         <div>
-                          <p className="font-medium">Внимание!</p>
-                          <p className="text-sm mt-1">
+                          <p className="font-medium text-sm sm:text-base">Внимание!</p>
+                          <p className="text-xs sm:text-sm mt-1">
                             Создание {copiesCount} копий займет около {Math.ceil(copiesCount * 6 / 60)} минут.
-                            При высокой нагрузке на API задача может выполниться не полностью.
                           </p>
                         </div>
                       </div>
@@ -357,20 +358,19 @@ export default function ScalingPage() {
                   )}
 
                   {/* Информация о времени */}
-                  <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg mb-4">
-                    <p className="text-sm text-blue-800">
-                      <strong>Ожидаемое время:</strong> ~{Math.ceil(copiesCount * 6)} секунд ({Math.ceil(copiesCount * 6 / 60)} мин.)
+                  <div className="p-3 sm:p-4 bg-blue-50 border border-blue-200 rounded-lg mb-3 sm:mb-4">
+                    <p className="text-xs sm:text-sm text-blue-800">
+                      <strong>Время:</strong> ~{Math.ceil(copiesCount * 6)} сек ({Math.ceil(copiesCount * 6 / 60)} мин.)
                     </p>
-                    <p className="text-sm text-blue-700 mt-1">
-                      Копии создаются с задержкой 6 секунд для соблюдения лимитов API.
-                      Все настройки, баннеры и тексты будут скопированы.
+                    <p className="text-xs sm:text-sm text-blue-700 mt-1">
+                      Копии создаются с задержкой 6 сек для соблюдения лимитов API.
                     </p>
                   </div>
 
                   <button
                     onClick={handleCreateTask}
                     disabled={createTaskMutation.isPending}
-                    className="btn-primary flex items-center gap-2"
+                    className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto"
                   >
                     {createTaskMutation.isPending ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
@@ -384,14 +384,13 @@ export default function ScalingPage() {
             </>
           ) : (
             <>
-              <h2 className="text-lg font-semibold mb-4">Пакетное масштабирование</h2>
-              <p className="text-gray-500 text-sm mb-4">
-                Введите список ID групп объявлений через запятую, пробел или каждый ID на новой строке.
-                Задачи будут выполняться последовательно.
+              <h2 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4">Пакетное масштабирование</h2>
+              <p className="text-gray-500 text-xs sm:text-sm mb-3 sm:mb-4">
+                Введите список ID групп через запятую или каждый ID на новой строке.
               </p>
 
               {/* Ввод списка ID */}
-              <div className="mb-4">
+              <div className="mb-3 sm:mb-4">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   ID групп объявлений
                 </label>
@@ -401,21 +400,21 @@ export default function ScalingPage() {
                     setBatchIds(e.target.value)
                     setBatchResult(null)
                   }}
-                  placeholder="124065573, 123563207, 124487188&#10;или каждый ID на новой строке"
-                  className="input min-h-[120px] resize-y"
-                  rows={5}
+                  placeholder="124065573, 123563207&#10;или каждый ID на новой строке"
+                  className="input min-h-[100px] sm:min-h-[120px] resize-y text-sm"
+                  rows={4}
                 />
                 {parsedBatchIds.length > 0 && (
-                  <p className="text-sm text-gray-500 mt-2">
+                  <p className="text-xs sm:text-sm text-gray-500 mt-2">
                     Найдено ID: {parsedBatchIds.length}
                   </p>
                 )}
               </div>
 
               {/* Количество копий */}
-              <div className="mb-4">
+              <div className="mb-3 sm:mb-4">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Количество копий для каждой группы (максимум {MAX_COPIES})
+                  Копий для каждой группы (макс. {MAX_COPIES})
                 </label>
                 <input
                   type="number"
@@ -423,40 +422,37 @@ export default function ScalingPage() {
                   max={MAX_COPIES}
                   value={copiesCount}
                   onChange={(e) => setCopiesCount(Math.min(MAX_COPIES, Math.max(1, parseInt(e.target.value) || 1)))}
-                  className="input w-32"
+                  className="input w-24 sm:w-32"
                 />
               </div>
 
               {/* Информация о времени */}
               {parsedBatchIds.length > 0 && (
-                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg mb-4">
-                  <p className="text-sm text-blue-800">
+                <div className="p-3 sm:p-4 bg-blue-50 border border-blue-200 rounded-lg mb-3 sm:mb-4">
+                  <p className="text-xs sm:text-sm text-blue-800">
                     <strong>Будет создано:</strong> {parsedBatchIds.length * copiesCount} копий из {parsedBatchIds.length} групп
                   </p>
-                  <p className="text-sm text-blue-700 mt-1">
-                    <strong>Ожидаемое время:</strong> ~{Math.ceil(parsedBatchIds.length * copiesCount * 6 / 60)} минут
-                  </p>
-                  <p className="text-sm text-blue-600 mt-1">
-                    Задачи выполняются последовательно для соблюдения лимитов API.
+                  <p className="text-xs sm:text-sm text-blue-700 mt-1">
+                    <strong>Время:</strong> ~{Math.ceil(parsedBatchIds.length * copiesCount * 6 / 60)} мин.
                   </p>
                 </div>
               )}
 
               {/* Результат пакетного создания */}
               {batchResult && (
-                <div className={`p-4 rounded-lg mb-4 ${batchResult.errors.length > 0 ? 'bg-yellow-50 border border-yellow-200' : 'bg-green-50 border border-green-200'}`}>
+                <div className={`p-3 sm:p-4 rounded-lg mb-3 sm:mb-4 ${batchResult.errors.length > 0 ? 'bg-yellow-50 border border-yellow-200' : 'bg-green-50 border border-green-200'}`}>
                   <div className="flex items-center gap-2 mb-2">
-                    <CheckCircle className={`w-5 h-5 ${batchResult.errors.length > 0 ? 'text-yellow-700' : 'text-green-700'}`} />
-                    <span className={`font-medium ${batchResult.errors.length > 0 ? 'text-yellow-700' : 'text-green-700'}`}>
+                    <CheckCircle className={`w-5 h-5 flex-shrink-0 ${batchResult.errors.length > 0 ? 'text-yellow-700' : 'text-green-700'}`} />
+                    <span className={`font-medium text-sm sm:text-base ${batchResult.errors.length > 0 ? 'text-yellow-700' : 'text-green-700'}`}>
                       {batchResult.message}
                     </span>
                   </div>
-                  <p className="text-sm text-gray-600">Ожидаемое время: {batchResult.estimatedTime}</p>
+                  <p className="text-xs sm:text-sm text-gray-600">Время: {batchResult.estimatedTime}</p>
 
                   {batchResult.errors.length > 0 && (
-                    <div className="mt-3">
-                      <p className="text-sm font-medium text-red-700">Ошибки:</p>
-                      <ul className="text-sm text-red-600 mt-1">
+                    <div className="mt-2 sm:mt-3">
+                      <p className="text-xs sm:text-sm font-medium text-red-700">Ошибки:</p>
+                      <ul className="text-xs sm:text-sm text-red-600 mt-1">
                         {batchResult.errors.map((err, i) => (
                           <li key={i}>ID {err.adGroupId}: {err.error}</li>
                         ))}
@@ -469,27 +465,27 @@ export default function ScalingPage() {
               <button
                 onClick={handleCreateBatch}
                 disabled={createBatchMutation.isPending || parsedBatchIds.length === 0}
-                className="btn-primary flex items-center gap-2"
+                className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto text-sm sm:text-base"
               >
                 {createBatchMutation.isPending ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
                   <List className="w-4 h-4" />
                 )}
-                Создать задачи ({parsedBatchIds.length} групп × {copiesCount} копий)
+                Создать ({parsedBatchIds.length} × {copiesCount})
               </button>
             </>
           )}
         </div>
 
         {/* Список задач */}
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">История задач</h2>
+        <div className="flex items-center justify-between mb-3 sm:mb-4">
+          <h2 className="text-base sm:text-lg font-semibold">История задач</h2>
           <button
             onClick={() => refetch()}
             className="text-gray-500 hover:text-gray-700 p-2"
           >
-            <RefreshCw className="w-5 h-5" />
+            <RefreshCw className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
         </div>
 
@@ -498,38 +494,38 @@ export default function ScalingPage() {
             <Loader2 className="w-8 h-8 animate-spin text-primary-600" />
           </div>
         ) : tasks.length === 0 ? (
-          <div className="card text-center py-12">
-            <Copy className="w-12 h-12 mx-auto mb-4 text-gray-400" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">
+          <div className="card text-center py-8 sm:py-12">
+            <Copy className="w-10 h-10 sm:w-12 sm:h-12 mx-auto mb-4 text-gray-400" />
+            <h3 className="text-base sm:text-lg font-medium text-gray-900 mb-2">
               Нет задач масштабирования
             </h3>
-            <p className="text-gray-500">
-              Создайте первую задачу, указав ID группы объявлений
+            <p className="text-gray-500 text-sm">
+              Создайте первую задачу, указав ID группы
             </p>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-2 sm:space-y-3">
             {tasks.map((task) => (
-              <div key={task.id} className="card">
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
+              <div key={task.id} className="card p-3 sm:p-4">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-2">
                       {getStatusBadge(task.status)}
-                      <span className="text-sm text-gray-500">
+                      <span className="text-xs sm:text-sm text-gray-500">
                         {formatDate(task.createdAt)}
                       </span>
                     </div>
-                    <h3 className="font-medium text-gray-900">
+                    <h3 className="font-medium text-gray-900 text-sm sm:text-base truncate">
                       {task.sourceAdGroupName || `Группа ${task.sourceAdGroupId}`}
                     </h3>
-                    <div className="text-sm text-gray-500 mt-1">
+                    <div className="text-xs sm:text-sm text-gray-500 mt-1">
                       Создано {task.copiesCreated} из {task.copiesCount} копий
                     </div>
 
                     {/* Прогресс бар */}
                     {task.status === 'running' && (
-                      <div className="mt-3">
-                        <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                      <div className="mt-2 sm:mt-3">
+                        <div className="h-1.5 sm:h-2 bg-gray-200 rounded-full overflow-hidden">
                           <div
                             className="h-full bg-primary-600 transition-all duration-500"
                             style={{ width: `${task.progress}%` }}
@@ -541,20 +537,20 @@ export default function ScalingPage() {
 
                     {/* Созданные копии */}
                     {task.createdCopies && task.createdCopies.length > 0 && (
-                      <div className="mt-3">
-                        <p className="text-xs text-gray-500 mb-1">Созданные копии:</p>
+                      <div className="mt-2 sm:mt-3">
+                        <p className="text-xs text-gray-500 mb-1">Копии:</p>
                         <div className="flex flex-wrap gap-1">
-                          {task.createdCopies.slice(0, 5).map((copy) => (
+                          {task.createdCopies.slice(0, 3).map((copy) => (
                             <span
                               key={copy.id}
-                              className="inline-block px-2 py-0.5 bg-gray-100 text-gray-700 text-xs rounded"
+                              className="inline-block px-1.5 sm:px-2 py-0.5 bg-gray-100 text-gray-700 text-xs rounded"
                             >
-                              ID: {copy.id}
+                              {copy.id}
                             </span>
                           ))}
-                          {task.createdCopies.length > 5 && (
+                          {task.createdCopies.length > 3 && (
                             <span className="text-xs text-gray-500">
-                              +{task.createdCopies.length - 5} ещё
+                              +{task.createdCopies.length - 3}
                             </span>
                           )}
                         </div>
@@ -563,7 +559,7 @@ export default function ScalingPage() {
 
                     {/* Ошибка */}
                     {task.errorMessage && (
-                      <p className="text-sm text-red-600 mt-2">{task.errorMessage}</p>
+                      <p className="text-xs sm:text-sm text-red-600 mt-2 break-all">{task.errorMessage}</p>
                     )}
                   </div>
 
@@ -571,9 +567,9 @@ export default function ScalingPage() {
                   {task.status !== 'running' && (
                     <button
                       onClick={() => handleDelete(task.id)}
-                      className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors ml-4"
+                      className="p-1.5 sm:p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors flex-shrink-0"
                     >
-                      <Trash2 className="w-5 h-5" />
+                      <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
                     </button>
                   )}
                 </div>

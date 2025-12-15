@@ -5,12 +5,14 @@ export class UpdateAutoDisableRuleDto {
   @IsString()
   name?: string;
 
+  // Тип метрики: clicks (клики), goals (результаты/лиды), ctr, cpl (цена за результат)
   @IsOptional()
-  @IsIn(['cpc', 'ctr', 'cpl', 'conversions'])
+  @IsIn(['clicks', 'goals', 'ctr', 'cpl'])
   metricType?: string;
 
+  // Оператор: lt (<), lte (<=), eq (=), gt (>), gte (>=)
   @IsOptional()
-  @IsIn(['gte', 'lt'])
+  @IsIn(['lt', 'lte', 'eq', 'gt', 'gte'])
   operator?: string;
 
   @IsOptional()

@@ -87,17 +87,17 @@ export default function RulesPage() {
   return (
     <Layout>
       <div className="max-w-7xl">
-        <div className="flex items-center justify-between mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">Правила автодублирования</h1>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 sm:mb-8">
+          <h1 className="text-xl sm:text-3xl font-bold text-gray-900">Правила автодублирования</h1>
           <button
             onClick={() => {
               setEditingRule(null)
               setIsModalOpen(true)
             }}
-            className="btn btn-primary flex items-center gap-2"
+            className="btn btn-primary flex items-center justify-center gap-2 w-full sm:w-auto"
           >
             <Plus className="w-5 h-5" />
-            Создать правило
+            <span className="sm:inline">Создать правило</span>
           </button>
         </div>
 
@@ -124,29 +124,29 @@ export default function RulesPage() {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-6">
+          <div className="grid grid-cols-1 gap-4 sm:gap-6">
             {rules.map((rule) => (
-              <div key={rule.id} className="card">
-                <div className="flex items-start justify-between mb-4">
-                  <div>
-                    <div className="flex items-center gap-3 mb-2">
-                      <h3 className="text-xl font-semibold text-gray-900">
+              <div key={rule.id} className="card p-3 sm:p-4">
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 mb-3 sm:mb-4">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-2">
+                      <h3 className="text-lg sm:text-xl font-semibold text-gray-900 truncate">
                         {rule.name}
                       </h3>
                       <span
-                        className={`badge ${
+                        className={`badge text-xs ${
                           rule.isActive ? 'badge-success' : 'badge-error'
                         }`}
                       >
                         {rule.isActive ? 'Активно' : 'Неактивно'}
                       </span>
                     </div>
-                    <p className="text-gray-600">
+                    <p className="text-sm text-gray-600">
                       Запуск каждый день в {rule.runTime}
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
                     <button
                       onClick={() => testMutation.mutate(rule.id)}
                       disabled={testMutation.isPending}
@@ -211,22 +211,22 @@ export default function RulesPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-4 p-4 bg-gray-50 rounded-lg">
+                <div className="grid grid-cols-3 gap-2 sm:gap-4 p-3 sm:p-4 bg-gray-50 rounded-lg">
                   <div>
-                    <p className="text-sm text-gray-600 mb-1">Порог CPL</p>
-                    <p className="text-lg font-semibold text-gray-900">
+                    <p className="text-xs sm:text-sm text-gray-600 mb-1">Порог CPL</p>
+                    <p className="text-sm sm:text-lg font-semibold text-gray-900">
                       ≤ {rule.cplThreshold}₽
                     </p>
                   </div>
                   <div>
-                    <p className="text-sm text-gray-600 mb-1">Минимум лидов</p>
-                    <p className="text-lg font-semibold text-gray-900">
+                    <p className="text-xs sm:text-sm text-gray-600 mb-1">Мин. лидов</p>
+                    <p className="text-sm sm:text-lg font-semibold text-gray-900">
                       {rule.minLeads}
                     </p>
                   </div>
                   <div>
-                    <p className="text-sm text-gray-600 mb-1">Копий создавать</p>
-                    <p className="text-lg font-semibold text-gray-900">
+                    <p className="text-xs sm:text-sm text-gray-600 mb-1">Копий</p>
+                    <p className="text-sm sm:text-lg font-semibold text-gray-900">
                       {rule.copiesCount}
                     </p>
                   </div>

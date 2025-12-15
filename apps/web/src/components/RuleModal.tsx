@@ -45,7 +45,9 @@ export default function RuleModal({ rule, onClose, onSuccess }: RuleModalProps) 
       const payload = {
         ...data,
         copyBudget: data.copyBudget === '' ? null : Number(data.copyBudget),
-        vkAccountId: currentAccount?.id,
+        // При редактировании НЕ отправляем vkAccountId (не меняем привязку к аккаунту)
+        // При создании привязываем к текущему аккаунту
+        ...(rule ? {} : { vkAccountId: currentAccount?.id }),
       }
       if (rule) {
         return api.put(`/rules/${rule.id}`, payload)
@@ -236,7 +238,7 @@ export default function RuleModal({ rule, onClose, onSuccess }: RuleModalProps) 
 
           {mutation.isError && (
             <div className="p-4 bg-red-50 text-red-700 rounded-lg text-sm">
-              Ошибка при сохранении правила. Проверьте данные и попробуйте снова.
+              Ошибка при сохранении правила: {(mutation.error as any)?.response?.data?.message || (mutation.error as any)?.message || 'Проверьте данные и попробуйте снова.'}
             </div>
           )}
         </form>

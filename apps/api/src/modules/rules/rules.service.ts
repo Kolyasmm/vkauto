@@ -27,17 +27,40 @@ export class RulesService {
   ) {}
 
   /**
+   * Проверить, имеет ли пользователь доступ к VK аккаунту (владелец или расшарен с canEdit)
+   */
+  private async checkVkAccountAccess(vkAccountId: number, userId: number, requireEdit: boolean = false): Promise<boolean> {
+    // Проверяем, является ли пользователь владельцем
+    const ownedAccount = await this.prisma.vkAccount.findFirst({
+      where: { id: vkAccountId, userId },
+    });
+
+    if (ownedAccount) {
+      return true;
+    }
+
+    // Проверяем, расшарен ли аккаунт с этим пользователем
+    const sharedAccess = await this.prisma.vkAccountShare.findFirst({
+      where: {
+        vkAccountId,
+        sharedWithUserId: userId,
+        ...(requireEdit ? { canEdit: true } : {}),
+      },
+    });
+
+    return !!sharedAccess;
+  }
+
+  /**
    * Создать правило
    */
   async create(userId: number, dto: CreateRuleDto) {
-    // Если указан vkAccountId - проверяем доступ к аккаунту
+    // Если указан vkAccountId - проверяем доступ к аккаунту (нужен canEdit для создания правил)
     if (dto.vkAccountId) {
-      const vkAccount = await this.prisma.vkAccount.findFirst({
-        where: { id: dto.vkAccountId, userId },
-      });
+      const hasAccess = await this.checkVkAccountAccess(dto.vkAccountId, userId, true);
 
-      if (!vkAccount) {
-        throw new BadRequestException('VK аккаунт не найден или не принадлежит вам');
+      if (!hasAccess) {
+        throw new BadRequestException('VK аккаунт не найден или у вас нет прав на редактирование');
       }
     }
 
@@ -62,14 +85,33 @@ export class RulesService {
   }
 
   /**
-   * Получить все правила пользователя
+   * Получить все правила пользователя (включая правила расшаренных аккаунтов)
    */
   async findAll(userId: number, vkAccountId?: number) {
+    // Если указан конкретный vkAccountId - проверяем доступ и возвращаем правила для него
+    if (vkAccountId) {
+      const hasAccess = await this.checkVkAccountAccess(vkAccountId, userId);
+      if (!hasAccess) {
+        return [];
+      }
+
+      return this.prisma.rule.findMany({
+        where: { vkAccountId },
+        include: {
+          adAccount: true,
+          vkAccount: { select: { id: true, name: true } },
+          executions: {
+            orderBy: { executedAt: 'desc' },
+            take: 5,
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+    }
+
+    // Иначе возвращаем все правила пользователя
     return this.prisma.rule.findMany({
-      where: {
-        userId,
-        ...(vkAccountId ? { vkAccountId } : {}),
-      },
+      where: { userId },
       include: {
         adAccount: true,
         vkAccount: { select: { id: true, name: true } },
@@ -83,11 +125,11 @@ export class RulesService {
   }
 
   /**
-   * Получить правило по ID
+   * Получить правило по ID (с проверкой доступа через shared accounts)
    */
   async findOne(id: number, userId: number) {
-    const rule = await this.prisma.rule.findFirst({
-      where: { id, userId },
+    const rule = await this.prisma.rule.findUnique({
+      where: { id },
       include: {
         adAccount: true,
         vkAccount: { select: { id: true, name: true } },
@@ -105,14 +147,46 @@ export class RulesService {
       throw new NotFoundException(`Правило с ID ${id} не найдено`);
     }
 
+    // Проверяем, что пользователь имеет доступ к этому правилу
+    // (либо владелец правила, либо имеет доступ к VK аккаунту)
+    if (rule.userId !== userId) {
+      if (rule.vkAccountId) {
+        const hasAccess = await this.checkVkAccountAccess(rule.vkAccountId, userId);
+        if (!hasAccess) {
+          throw new NotFoundException(`Правило с ID ${id} не найдено`);
+        }
+      } else {
+        throw new NotFoundException(`Правило с ID ${id} не найдено`);
+      }
+    }
+
     return rule;
   }
 
   /**
-   * Обновить правило
+   * Обновить правило (требуется canEdit для shared accounts)
    */
   async update(id: number, userId: number, dto: UpdateRuleDto) {
-    const rule = await this.findOne(id, userId);
+    const rule = await this.prisma.rule.findUnique({
+      where: { id },
+      include: { vkAccount: true },
+    });
+
+    if (!rule) {
+      throw new NotFoundException(`Правило с ID ${id} не найдено`);
+    }
+
+    // Проверяем права на редактирование
+    if (rule.userId !== userId) {
+      if (rule.vkAccountId) {
+        const hasEditAccess = await this.checkVkAccountAccess(rule.vkAccountId, userId, true);
+        if (!hasEditAccess) {
+          throw new BadRequestException('У вас нет прав на редактирование этого правила');
+        }
+      } else {
+        throw new NotFoundException(`Правило с ID ${id} не найдено`);
+      }
+    }
 
     return this.prisma.rule.update({
       where: { id: rule.id },
@@ -124,10 +198,28 @@ export class RulesService {
   }
 
   /**
-   * Удалить правило
+   * Удалить правило (требуется canEdit для shared accounts)
    */
   async remove(id: number, userId: number) {
-    const rule = await this.findOne(id, userId);
+    const rule = await this.prisma.rule.findUnique({
+      where: { id },
+    });
+
+    if (!rule) {
+      throw new NotFoundException(`Правило с ID ${id} не найдено`);
+    }
+
+    // Проверяем права на редактирование
+    if (rule.userId !== userId) {
+      if (rule.vkAccountId) {
+        const hasEditAccess = await this.checkVkAccountAccess(rule.vkAccountId, userId, true);
+        if (!hasEditAccess) {
+          throw new BadRequestException('У вас нет прав на удаление этого правила');
+        }
+      } else {
+        throw new NotFoundException(`Правило с ID ${id} не найдено`);
+      }
+    }
 
     await this.prisma.rule.delete({
       where: { id: rule.id },

@@ -12,7 +12,7 @@ export interface AutoDisableExecutionResult {
   adsDisabled: number;
   status: 'success' | 'failed';
   errorMessage?: string;
-  details: { adId: number; name: string; metricValue: number; threshold: number }[];
+  details: { adId: number; name: string; spent: number; metricValue: number; threshold: number; metricType: string }[];
 }
 
 @Injectable()
@@ -26,7 +26,40 @@ export class AutoDisableService {
     private notificationsService: NotificationsService,
   ) {}
 
+  /**
+   * Проверить, имеет ли пользователь доступ к VK аккаунту (владелец или расшарен с canEdit)
+   */
+  private async checkVkAccountAccess(vkAccountId: number, userId: number, requireEdit: boolean = false): Promise<boolean> {
+    // Проверяем, является ли пользователь владельцем
+    const ownedAccount = await this.prisma.vkAccount.findFirst({
+      where: { id: vkAccountId, userId },
+    });
+
+    if (ownedAccount) {
+      return true;
+    }
+
+    // Проверяем, расшарен ли аккаунт с этим пользователем
+    const sharedAccess = await this.prisma.vkAccountShare.findFirst({
+      where: {
+        vkAccountId,
+        sharedWithUserId: userId,
+        ...(requireEdit ? { canEdit: true } : {}),
+      },
+    });
+
+    return !!sharedAccess;
+  }
+
   async create(userId: number, dto: CreateAutoDisableRuleDto) {
+    // Проверяем доступ к VK аккаунту (нужен canEdit для создания правил)
+    if (dto.vkAccountId) {
+      const hasAccess = await this.checkVkAccountAccess(dto.vkAccountId, userId, true);
+      if (!hasAccess) {
+        throw new NotFoundException('VK аккаунт не найден или у вас нет прав на редактирование');
+      }
+    }
+
     return this.prisma.autoDisableRule.create({
       data: {
         userId,
@@ -44,11 +77,29 @@ export class AutoDisableService {
   }
 
   async findAll(userId: number, vkAccountId?: number) {
+    // Если указан конкретный vkAccountId - проверяем доступ и возвращаем правила для него
+    if (vkAccountId) {
+      const hasAccess = await this.checkVkAccountAccess(vkAccountId, userId);
+      if (!hasAccess) {
+        return [];
+      }
+
+      return this.prisma.autoDisableRule.findMany({
+        where: { vkAccountId },
+        include: {
+          vkAccount: { select: { id: true, name: true } },
+          executions: {
+            take: 5,
+            orderBy: { executedAt: 'desc' },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+    }
+
+    // Иначе возвращаем все правила пользователя
     return this.prisma.autoDisableRule.findMany({
-      where: {
-        userId,
-        ...(vkAccountId ? { vkAccountId } : {}),
-      },
+      where: { userId },
       include: {
         vkAccount: { select: { id: true, name: true } },
         executions: {
@@ -61,8 +112,8 @@ export class AutoDisableService {
   }
 
   async findOne(id: number, userId: number) {
-    const rule = await this.prisma.autoDisableRule.findFirst({
-      where: { id, userId },
+    const rule = await this.prisma.autoDisableRule.findUnique({
+      where: { id },
       include: {
         vkAccount: { select: { id: true, name: true } },
         executions: {
@@ -76,11 +127,41 @@ export class AutoDisableService {
       throw new NotFoundException(`Правило с ID ${id} не найдено`);
     }
 
+    // Проверяем доступ к правилу (владелец или через shared account)
+    if (rule.userId !== userId) {
+      if (rule.vkAccountId) {
+        const hasAccess = await this.checkVkAccountAccess(rule.vkAccountId, userId);
+        if (!hasAccess) {
+          throw new NotFoundException(`Правило с ID ${id} не найдено`);
+        }
+      } else {
+        throw new NotFoundException(`Правило с ID ${id} не найдено`);
+      }
+    }
+
     return rule;
   }
 
   async update(id: number, userId: number, dto: UpdateAutoDisableRuleDto) {
-    await this.findOne(id, userId);
+    const rule = await this.prisma.autoDisableRule.findUnique({
+      where: { id },
+    });
+
+    if (!rule) {
+      throw new NotFoundException(`Правило с ID ${id} не найдено`);
+    }
+
+    // Проверяем права на редактирование
+    if (rule.userId !== userId) {
+      if (rule.vkAccountId) {
+        const hasEditAccess = await this.checkVkAccountAccess(rule.vkAccountId, userId, true);
+        if (!hasEditAccess) {
+          throw new NotFoundException('У вас нет прав на редактирование этого правила');
+        }
+      } else {
+        throw new NotFoundException(`Правило с ID ${id} не найдено`);
+      }
+    }
 
     return this.prisma.autoDisableRule.update({
       where: { id },
@@ -89,7 +170,25 @@ export class AutoDisableService {
   }
 
   async remove(id: number, userId: number) {
-    await this.findOne(id, userId);
+    const rule = await this.prisma.autoDisableRule.findUnique({
+      where: { id },
+    });
+
+    if (!rule) {
+      throw new NotFoundException(`Правило с ID ${id} не найдено`);
+    }
+
+    // Проверяем права на редактирование
+    if (rule.userId !== userId) {
+      if (rule.vkAccountId) {
+        const hasEditAccess = await this.checkVkAccountAccess(rule.vkAccountId, userId, true);
+        if (!hasEditAccess) {
+          throw new NotFoundException('У вас нет прав на удаление этого правила');
+        }
+      } else {
+        throw new NotFoundException(`Правило с ID ${id} не найдено`);
+      }
+    }
 
     await this.prisma.autoDisableRule.delete({
       where: { id },
@@ -100,6 +199,7 @@ export class AutoDisableService {
 
   /**
    * Выполнить правило автоотключения
+   * Работает с БАННЕРАМИ (объявлениями), а не с группами объявлений
    */
   async executeRule(ruleId: number): Promise<AutoDisableExecutionResult> {
     const rule = await this.prisma.autoDisableRule.findUnique({
@@ -130,12 +230,12 @@ export class AutoDisableService {
       // Устанавливаем токен для VK API
       this.vkService.setAccessToken(rule.vkAccount.accessToken);
 
-      // Получаем активные группы объявлений
-      const activeGroups = await this.vkService.getActiveAdGroups();
-      result.adsChecked = activeGroups.length;
+      // Получаем активные баннеры (объявления), а не группы
+      const activeBanners = await this.vkService.getAllActiveBanners();
+      result.adsChecked = activeBanners.length;
 
-      if (activeGroups.length === 0) {
-        this.logger.log('Нет активных групп объявлений');
+      if (activeBanners.length === 0) {
+        this.logger.log('Нет активных баннеров (объявлений)');
         await this.saveExecution(ruleId, result);
         return result;
       }
@@ -148,69 +248,97 @@ export class AutoDisableService {
       const dateFromStr = dateFrom.toISOString().split('T')[0];
       const dateToStr = dateTo.toISOString().split('T')[0];
 
-      // Получаем статистику
-      const groupIds = activeGroups.map((g) => g.id);
-      const stats = await this.vkService.getStatistics(dateFromStr, dateToStr, groupIds, 'ad_group');
+      // Получаем статистику по БАННЕРАМ (объявлениям)
+      const bannerIds = activeBanners.map((b) => b.id);
+      const stats = await this.vkService.getStatistics(dateFromStr, dateToStr, bannerIds, 'banner');
 
-      // Проверяем каждую группу
-      for (const group of activeGroups) {
-        const stat = stats.find((s) => s.id === group.id);
+      this.logger.log(`Получена статистика для ${stats.length} баннеров`);
+
+      // Проверяем каждый баннер
+      // Логика: "если потрачено >= X И метрика (клики/результаты/CTR) < порога"
+      for (const banner of activeBanners) {
+        const stat = stats.find((s) => s.id === banner.id);
         if (!stat || !stat.total?.base) continue;
 
         const base = stat.total.base;
-        const spent = parseFloat(base.spent);
+        const spent = parseFloat(base.spent) || 0;
         const minSpent = Number(rule.minSpent);
 
-        // Проверяем минимальный бюджет
+        // ГЛАВНОЕ УСЛОВИЕ: проверяем потраченный бюджет
+        // Правило срабатывает только если потрачено >= minSpent
         if (spent < minSpent) continue;
 
-        // Вычисляем метрику
+        // Вычисляем метрику для проверки
         let metricValue: number;
         const threshold = Number(rule.threshold);
 
+        // Получаем результаты из VK (лиды/конверсии)
+        const baseAny = base as any;
+        const vkData = baseAny.vk || {};
+        const goals = vkData.goals || baseAny.goals || 0;
+        const clicks = baseAny.clicks || 0;
+        const shows = baseAny.shows || 0;
+
         switch (rule.metricType) {
-          case 'cpc':
-            metricValue = parseFloat(base.cpc);
+          case 'clicks':
+            // Количество кликов
+            metricValue = clicks;
+            break;
+          case 'goals':
+            // Количество результатов/лидов
+            metricValue = goals;
             break;
           case 'ctr':
             // CTR = (clicks / shows) * 100
-            metricValue = base.shows > 0 ? (base.clicks / base.shows) * 100 : 0;
+            metricValue = shows > 0 ? (clicks / shows) * 100 : 0;
             break;
           case 'cpl':
-            // CPL = spent / goals
-            metricValue = base.goals > 0 ? spent / base.goals : Infinity;
-            break;
-          case 'conversions':
-            metricValue = base.goals;
+            // CPL = spent / goals (цена за результат)
+            // Если результатов 0, то CPL бесконечно большой - устанавливаем очень большое значение
+            metricValue = goals > 0 ? spent / goals : 999999;
             break;
           default:
             continue;
         }
 
+        // Пропускаем если метрика NaN или Infinity
+        if (!Number.isFinite(metricValue)) {
+          continue;
+        }
+
         // Проверяем условие
         let shouldDisable = false;
-        if (rule.operator === 'gte') {
-          shouldDisable = metricValue >= threshold;
-        } else if (rule.operator === 'lt') {
+        if (rule.operator === 'lt') {
           shouldDisable = metricValue < threshold;
+        } else if (rule.operator === 'lte') {
+          shouldDisable = metricValue <= threshold;
+        } else if (rule.operator === 'eq') {
+          shouldDisable = metricValue === threshold;
+        } else if (rule.operator === 'gt') {
+          shouldDisable = metricValue > threshold;
+        } else if (rule.operator === 'gte') {
+          shouldDisable = metricValue >= threshold;
         }
 
         if (shouldDisable) {
+          const bannerName = (banner as any).name || `Баннер ${banner.id}`;
           this.logger.log(
-            `Отключение группы ${group.id} (${group.name}): ${rule.metricType}=${metricValue.toFixed(2)} ${rule.operator} ${threshold}`,
+            `Отключение объявления ${banner.id} (${bannerName}): потрачено ${spent.toFixed(2)}₽ >= ${minSpent}₽, ${rule.metricType}=${metricValue} ${rule.operator} ${threshold}`,
           );
 
           try {
-            await this.vkService.stopAdGroup(group.id);
+            await this.vkService.stopBanner(banner.id);
             result.adsDisabled++;
             result.details.push({
-              adId: group.id,
-              name: group.name,
+              adId: banner.id,
+              name: bannerName,
+              spent: Math.round(spent * 100) / 100,
               metricValue: Math.round(metricValue * 100) / 100,
               threshold,
+              metricType: rule.metricType,
             });
           } catch (error) {
-            this.logger.error(`Ошибка отключения группы ${group.id}: ${error.message}`);
+            this.logger.error(`Ошибка отключения баннера ${banner.id}: ${error.message}`);
           }
         }
       }
@@ -282,10 +410,10 @@ export class AutoDisableService {
    */
   getMetricTypes() {
     return [
-      { value: 'cpc', label: 'CPC (стоимость клика)', unit: '₽' },
-      { value: 'ctr', label: 'CTR (кликабельность)', unit: '%' },
-      { value: 'cpl', label: 'CPL (стоимость лида)', unit: '₽' },
-      { value: 'conversions', label: 'Конверсии (количество)', unit: '' },
+      { value: 'clicks', label: 'Клики', unit: '' },
+      { value: 'goals', label: 'Результаты (лиды)', unit: '' },
+      { value: 'ctr', label: 'CTR', unit: '%' },
+      { value: 'cpl', label: 'CPL (цена за результат)', unit: '₽' },
     ];
   }
 
@@ -294,8 +422,11 @@ export class AutoDisableService {
    */
   getOperators() {
     return [
-      { value: 'gte', label: '≥ (больше или равно)' },
       { value: 'lt', label: '< (меньше)' },
+      { value: 'lte', label: '≤ (меньше или равно)' },
+      { value: 'eq', label: '= (равно)' },
+      { value: 'gt', label: '> (больше)' },
+      { value: 'gte', label: '≥ (больше или равно)' },
     ];
   }
 }

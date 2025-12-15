@@ -24,22 +24,38 @@ interface AutoDisableRuleModalProps {
   onSuccess: () => void
 }
 
+// Новая логика: "если потрачено >= X И метрика соответствует условию"
 const metricTypes = [
-  { value: 'cpc', label: 'CPC (стоимость клика)', unit: '₽', defaultThreshold: 75 },
-  { value: 'ctr', label: 'CTR (кликабельность)', unit: '%', defaultThreshold: 0.5 },
-  { value: 'cpl', label: 'CPL (стоимость лида)', unit: '₽', defaultThreshold: 200 },
-  { value: 'conversions', label: 'Конверсии', unit: '', defaultThreshold: 1 },
+  { value: 'clicks', label: 'Клики', unit: '', defaultThreshold: 0, defaultOperator: 'eq' },
+  { value: 'goals', label: 'Результаты (лиды)', unit: '', defaultThreshold: 0, defaultOperator: 'eq' },
+  { value: 'ctr', label: 'CTR', unit: '%', defaultThreshold: 0.1, defaultOperator: 'lt' },
+  { value: 'cpl', label: 'CPL (цена за результат)', unit: '₽', defaultThreshold: 300, defaultOperator: 'gt' },
 ]
 
 const operators = [
-  { value: 'gte', label: '≥ больше или равно' },
-  { value: 'lt', label: '< меньше' },
+  { value: 'eq', label: '=' },
+  { value: 'lt', label: '<' },
+  { value: 'lte', label: '≤' },
+  { value: 'gt', label: '>' },
+  { value: 'gte', label: '≥' },
 ]
 
 const periods = [
-  { value: 1, label: 'За 1 день' },
+  { value: 1, label: 'За сегодня' },
   { value: 3, label: 'За 3 дня' },
   { value: 7, label: 'За 7 дней' },
+]
+
+// Пресеты правил на основе запроса таргетолога
+const presets = [
+  { name: 'Потрачено 75₽, кликов 0', minSpent: 75, metricType: 'clicks', operator: 'eq', threshold: 0 },
+  { name: 'Потрачено 160₽, кликов < 2', minSpent: 160, metricType: 'clicks', operator: 'lt', threshold: 2 },
+  { name: 'Потрачено 250₽, результатов 0', minSpent: 250, metricType: 'goals', operator: 'eq', threshold: 0 },
+  { name: 'Потрачено 350₽, результатов < 2', minSpent: 350, metricType: 'goals', operator: 'lt', threshold: 2 },
+  { name: 'Потрачено 650₽, результатов < 3', minSpent: 650, metricType: 'goals', operator: 'lt', threshold: 3 },
+  { name: 'Потрачено 100₽, CTR < 0.1%', minSpent: 100, metricType: 'ctr', operator: 'lt', threshold: 0.1 },
+  { name: 'CPL > 300₽ при 500₽ расхода', minSpent: 500, metricType: 'cpl', operator: 'gt', threshold: 300 },
+  { name: 'CPL > 200₽ при 400₽ расхода', minSpent: 400, metricType: 'cpl', operator: 'gt', threshold: 200 },
 ]
 
 export default function AutoDisableRuleModal({ rule, onClose, onSuccess }: AutoDisableRuleModalProps) {
@@ -47,11 +63,11 @@ export default function AutoDisableRuleModal({ rule, onClose, onSuccess }: AutoD
 
   const [formData, setFormData] = useState({
     name: '',
-    metricType: 'cpc',
-    operator: 'gte',
-    threshold: 75,
+    metricType: 'clicks',
+    operator: 'eq',
+    threshold: 0,
     periodDays: 1,
-    minSpent: 200,
+    minSpent: 75,
     isActive: true,
   })
 
@@ -72,8 +88,16 @@ export default function AutoDisableRuleModal({ rule, onClose, onSuccess }: AutoD
   const mutation = useMutation({
     mutationFn: (data: typeof formData) => {
       const payload = {
-        ...data,
-        vkAccountId: currentAccount?.id,
+        name: data.name,
+        metricType: data.metricType,
+        operator: data.operator,
+        threshold: Number(data.threshold),
+        periodDays: Number(data.periodDays),
+        minSpent: Number(data.minSpent),
+        isActive: data.isActive,
+        // При редактировании НЕ отправляем vkAccountId (не меняем привязку к аккаунту)
+        // При создании привязываем к текущему аккаунту
+        ...(rule ? {} : { vkAccountId: currentAccount?.id }),
       }
       if (rule) {
         return api.put(`/auto-disable/${rule.id}`, payload)
@@ -88,22 +112,32 @@ export default function AutoDisableRuleModal({ rule, onClose, onSuccess }: AutoD
     mutation.mutate(formData)
   }
 
-  const handleMetricChange = (metricType: string) => {
-    const metric = metricTypes.find(m => m.value === metricType)
+  const applyPreset = (preset: typeof presets[0]) => {
     setFormData({
       ...formData,
-      metricType,
-      threshold: metric?.defaultThreshold || 0,
-      // Меняем оператор в зависимости от метрики
-      operator: metricType === 'conversions' || metricType === 'ctr' ? 'lt' : 'gte',
+      name: preset.name,
+      minSpent: preset.minSpent,
+      metricType: preset.metricType,
+      operator: preset.operator,
+      threshold: preset.threshold,
     })
   }
 
   const selectedMetric = metricTypes.find(m => m.value === formData.metricType)
+  const selectedOperator = operators.find(o => o.value === formData.operator)
+
+  // Генерируем понятное описание правила
+  const getRuleDescription = () => {
+    const metric = metricTypes.find(m => m.value === formData.metricType)
+    const op = operators.find(o => o.value === formData.operator)
+    const period = periods.find(p => p.value === formData.periodDays)
+
+    return `Если потрачено ≥ ${formData.minSpent}₽ И ${metric?.label.toLowerCase()} ${op?.label} ${formData.threshold}${metric?.unit} (${period?.label.toLowerCase()}), то группа будет отключена`
+  }
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
           <h2 className="text-xl font-semibold text-gray-900">
             {rule ? 'Редактировать правило' : 'Новое правило автоотключения'}
@@ -126,6 +160,27 @@ export default function AutoDisableRuleModal({ rule, onClose, onSuccess }: AutoD
             </div>
           )}
 
+          {/* Presets - only show when creating new rule */}
+          {!rule && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Быстрые пресеты
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                {presets.map((preset, index) => (
+                  <button
+                    key={index}
+                    type="button"
+                    onClick={() => applyPreset(preset)}
+                    className="text-left p-3 text-sm border border-gray-200 rounded-lg hover:border-primary-500 hover:bg-primary-50 transition-colors"
+                  >
+                    {preset.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Name */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -136,59 +191,90 @@ export default function AutoDisableRuleModal({ rule, onClose, onSuccess }: AutoD
               className="input"
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              placeholder="Например: Отключить дорогие клики"
+              placeholder="Например: Отключить без кликов при 75₽"
               required
             />
           </div>
 
-          {/* Metric Type */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Метрика
+          {/* Main condition: minSpent */}
+          <div className="p-4 bg-orange-50 rounded-lg border border-orange-200">
+            <label className="block text-sm font-medium text-orange-800 mb-2">
+              Главное условие: минимальный расход (₽)
             </label>
-            <select
+            <input
+              type="number"
+              step="1"
+              min="0"
               className="input"
-              value={formData.metricType}
-              onChange={(e) => handleMetricChange(e.target.value)}
-            >
-              {metricTypes.map((metric) => (
-                <option key={metric.value} value={metric.value}>
-                  {metric.label}
-                </option>
-              ))}
-            </select>
+              value={formData.minSpent}
+              onChange={(e) => setFormData({ ...formData, minSpent: parseFloat(e.target.value) || 0 })}
+              required
+            />
+            <p className="text-xs text-orange-700 mt-1">
+              Правило сработает только если группа потратила ≥ этой суммы
+            </p>
           </div>
 
-          {/* Operator and Threshold */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Условие
-              </label>
-              <select
-                className="input"
-                value={formData.operator}
-                onChange={(e) => setFormData({ ...formData, operator: e.target.value })}
-              >
-                {operators.map((op) => (
-                  <option key={op.value} value={op.value}>
-                    {op.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Порог {selectedMetric?.unit}
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                className="input"
-                value={formData.threshold}
-                onChange={(e) => setFormData({ ...formData, threshold: parseFloat(e.target.value) || 0 })}
-                required
-              />
+          {/* Metric condition */}
+          <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+            <label className="block text-sm font-medium text-blue-800 mb-3">
+              Дополнительное условие: метрика
+            </label>
+
+            <div className="grid grid-cols-3 gap-3">
+              {/* Metric Type */}
+              <div>
+                <label className="block text-xs text-blue-700 mb-1">Метрика</label>
+                <select
+                  className="input"
+                  value={formData.metricType}
+                  onChange={(e) => {
+                    const metric = metricTypes.find(m => m.value === e.target.value)
+                    setFormData({
+                      ...formData,
+                      metricType: e.target.value,
+                      threshold: metric?.defaultThreshold || 0,
+                      operator: metric?.defaultOperator || 'eq'
+                    })
+                  }}
+                >
+                  {metricTypes.map((metric) => (
+                    <option key={metric.value} value={metric.value}>
+                      {metric.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Operator */}
+              <div>
+                <label className="block text-xs text-blue-700 mb-1">Условие</label>
+                <select
+                  className="input"
+                  value={formData.operator}
+                  onChange={(e) => setFormData({ ...formData, operator: e.target.value })}
+                >
+                  {operators.map((op) => (
+                    <option key={op.value} value={op.value}>
+                      {op.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Threshold */}
+              <div>
+                <label className="block text-xs text-blue-700 mb-1">Значение {selectedMetric?.unit}</label>
+                <input
+                  type="number"
+                  step={formData.metricType === 'ctr' ? '0.01' : '1'}
+                  min="0"
+                  className="input"
+                  value={formData.threshold}
+                  onChange={(e) => setFormData({ ...formData, threshold: parseFloat(e.target.value) || 0 })}
+                  required
+                />
+              </div>
             </div>
           </div>
 
@@ -215,26 +301,8 @@ export default function AutoDisableRuleModal({ rule, onClose, onSuccess }: AutoD
             </div>
           </div>
 
-          {/* Min Spent */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Минимальный расход для срабатывания (₽)
-            </label>
-            <input
-              type="number"
-              step="1"
-              className="input"
-              value={formData.minSpent}
-              onChange={(e) => setFormData({ ...formData, minSpent: parseFloat(e.target.value) || 0 })}
-              required
-            />
-            <p className="text-xs text-gray-500 mt-1">
-              Правило сработает только если объявление потратило минимум эту сумму
-            </p>
-          </div>
-
           {/* Active Toggle - only show when editing */}
-          {rule ? (
+          {rule && (
             <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
               <div>
                 <p className="font-medium text-gray-900">Активно</p>
@@ -254,18 +322,13 @@ export default function AutoDisableRuleModal({ rule, onClose, onSuccess }: AutoD
                 />
               </button>
             </div>
-          ) : (
-            <div className="p-4 bg-green-50 rounded-lg">
-              <p className="text-sm text-green-800">
-                Правило будет сразу активно и начнет проверяться каждые 10 минут после создания.
-              </p>
-            </div>
           )}
 
           {/* Rule Preview */}
-          <div className="p-4 bg-blue-50 rounded-lg">
-            <p className="text-sm text-blue-800">
-              <strong>Правило:</strong> Если {selectedMetric?.label} {formData.operator === 'gte' ? '≥' : '<'} {formData.threshold}{selectedMetric?.unit} за {periods.find(p => p.value === formData.periodDays)?.label.toLowerCase()} и расход ≥ {formData.minSpent}₽, то объявление будет отключено.
+          <div className="p-4 bg-green-50 rounded-lg border border-green-200">
+            <p className="text-sm font-medium text-green-800 mb-1">Правило:</p>
+            <p className="text-sm text-green-700">
+              {getRuleDescription()}
             </p>
           </div>
 
@@ -285,7 +348,7 @@ export default function AutoDisableRuleModal({ rule, onClose, onSuccess }: AutoD
 
           {mutation.isError && (
             <div className="p-4 bg-red-50 text-red-700 rounded-lg text-sm">
-              Ошибка при сохранении правила. Проверьте данные и попробуйте снова.
+              Ошибка при сохранении: {(mutation.error as any)?.response?.data?.message || 'Проверьте данные и попробуйте снова.'}
             </div>
           )}
         </form>

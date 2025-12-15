@@ -39,26 +39,29 @@ interface AutoDisableRule {
 }
 
 const metricLabels: Record<string, string> = {
-  cpc: 'CPC',
+  clicks: 'клики',
+  goals: 'результаты',
   ctr: 'CTR',
   cpl: 'CPL',
-  conversions: 'Конверсии',
 }
 
 const metricUnits: Record<string, string> = {
-  cpc: '₽',
+  clicks: '',
+  goals: '',
   ctr: '%',
   cpl: '₽',
-  conversions: '',
 }
 
 const operatorLabels: Record<string, string> = {
-  gte: '≥',
+  eq: '=',
+  lt: '<',
   lte: '≤',
+  gt: '>',
+  gte: '≥',
 }
 
 const periodLabels: Record<number, string> = {
-  1: '1 день',
+  1: 'сегодня',
   3: '3 дня',
   7: '7 дней',
 }
@@ -147,16 +150,16 @@ export default function AutoDisablePage() {
   return (
     <Layout>
       <div className="max-w-6xl">
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 sm:mb-8">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Автоотключение</h1>
-            <p className="text-gray-500 mt-1">
+            <h1 className="text-xl sm:text-3xl font-bold text-gray-900">Автоотключение</h1>
+            <p className="text-gray-500 mt-1 text-sm sm:text-base">
               Автоматическое отключение объявлений по метрикам
             </p>
           </div>
           <button
             onClick={() => setIsModalOpen(true)}
-            className="btn-primary flex items-center gap-2"
+            className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto"
           >
             <Plus className="w-5 h-5" />
             Добавить правило
@@ -189,17 +192,17 @@ export default function AutoDisablePage() {
             </button>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-3 sm:space-y-4">
             {rules.map((rule) => (
               <div
                 key={rule.id}
-                className="card hover:shadow-md transition-shadow"
+                className="card p-3 sm:p-4 hover:shadow-md transition-shadow"
               >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-start sm:items-center gap-3 sm:gap-4">
                     <button
                       onClick={() => toggleMutation.mutate({ id: rule.id, isActive: !rule.isActive })}
-                      className={`p-2 rounded-lg transition-colors ${
+                      className={`p-2 rounded-lg transition-colors flex-shrink-0 ${
                         rule.isActive
                           ? 'bg-green-100 text-green-600'
                           : 'bg-gray-100 text-gray-400'
@@ -207,54 +210,53 @@ export default function AutoDisablePage() {
                     >
                       <Power className="w-5 h-5" />
                     </button>
-                    <div>
-                      <h3 className="font-medium text-gray-900">{rule.name}</h3>
-                      <div className="flex items-center gap-3 mt-1 text-sm text-gray-500">
-                        <span className="bg-gray-100 px-2 py-0.5 rounded">
-                          {metricLabels[rule.metricType]} {operatorLabels[rule.operator]} {rule.threshold}{metricUnits[rule.metricType]}
+                    <div className="min-w-0">
+                      <h3 className="font-medium text-gray-900 truncate">{rule.name}</h3>
+                      <div className="flex items-center gap-2 sm:gap-3 mt-1 text-xs sm:text-sm text-gray-500 flex-wrap">
+                        <span className="bg-orange-100 text-orange-700 px-2 py-0.5 rounded">
+                          ≥{rule.minSpent}₽
                         </span>
-                        <span>Период: {periodLabels[rule.periodDays]}</span>
-                        <span>Мин. расход: {rule.minSpent}₽</span>
-                        <span className="flex items-center gap-1">
-                          <Clock className="w-3 h-3" />
-                          {rule.runTime}
+                        <span className="text-gray-400">И</span>
+                        <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded">
+                          {metricLabels[rule.metricType] || rule.metricType} {operatorLabels[rule.operator] || rule.operator} {rule.threshold}{metricUnits[rule.metricType] || ''}
                         </span>
+                        <span className="text-gray-400 hidden sm:inline">за {periodLabels[rule.periodDays] || `${rule.periodDays} дн.`}</span>
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center justify-between sm:justify-end gap-2">
                     {rule.executions && rule.executions.length > 0 && (
-                      <div className="text-sm text-gray-500 mr-4">
-                        Последний запуск:{' '}
+                      <div className="text-xs sm:text-sm text-gray-500 mr-2 sm:mr-4">
+                        <span className="hidden sm:inline">Последний: </span>
                         <span className={rule.executions[0].status === 'success' ? 'text-green-600' : 'text-red-600'}>
-                          {rule.executions[0].adsDisabled} отключено
+                          {rule.executions[0].adsDisabled} откл.
                         </span>
                       </div>
                     )}
                     <button
                       onClick={() => executeMutation.mutate(rule.id)}
                       disabled={runningRuleId === rule.id}
-                      className="btn-outline flex items-center gap-2"
+                      className="btn-outline flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm"
                     >
                       {runningRuleId === rule.id ? (
                         <Loader2 className="w-4 h-4 animate-spin" />
                       ) : (
                         <Play className="w-4 h-4" />
                       )}
-                      Запустить
+                      <span className="hidden sm:inline">Запустить</span>
                     </button>
                     <button
                       onClick={() => handleEdit(rule)}
-                      className="p-2 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
+                      className="p-1.5 sm:p-2 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
                     >
-                      <Edit2 className="w-5 h-5" />
+                      <Edit2 className="w-4 h-4 sm:w-5 sm:h-5" />
                     </button>
                     <button
                       onClick={() => handleDelete(rule.id)}
-                      className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      className="p-1.5 sm:p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                     >
-                      <Trash2 className="w-5 h-5" />
+                      <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
                     </button>
                   </div>
                 </div>

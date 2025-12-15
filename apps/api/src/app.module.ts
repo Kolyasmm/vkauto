@@ -12,6 +12,10 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { VkAccountsModule } from './modules/vk-accounts/vk-accounts.module';
 import { AutoDisableModule } from './modules/auto-disable/auto-disable.module';
 import { ScalingModule } from './modules/scaling/scaling.module';
+import { DuplicateModule } from './modules/duplicate/duplicate.module';
+import { BulkEditModule } from './modules/bulk-edit/bulk-edit.module';
+import { AutoUploadModule } from './modules/auto-upload/auto-upload.module';
+import { SegmentationModule } from './modules/segmentation/segmentation.module';
 
 @Module({
   imports: [
@@ -31,6 +35,10 @@ import { ScalingModule } from './modules/scaling/scaling.module';
     VkAccountsModule,
     AutoDisableModule,
     ScalingModule,
+    DuplicateModule,
+    BulkEditModule,
+    AutoUploadModule,
+    SegmentationModule,
   ],
 })
 export class AppModule {}
