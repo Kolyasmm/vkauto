@@ -60,7 +60,8 @@ export class SegmentationService {
     const vkAccount = await this.getVkAccount(userId, vkAccountId);
 
     const campaigns = await this.vkService.getCampaignsWithDetails(vkAccount.accessToken);
-    const allAdGroups = await this.vkService.getAllAdGroupsWithToken(vkAccount.accessToken);
+    // Загружаем только АКТИВНЫЕ группы объявлений (не остановленные и не удалённые)
+    const allAdGroups = await this.vkService.getAllAdGroupsWithToken(vkAccount.accessToken, undefined, 'active');
 
     return campaigns.map((campaign: any) => {
       const adGroups = allAdGroups.filter((ag: any) => ag.ad_plan_id === campaign.id);
@@ -78,7 +79,8 @@ export class SegmentationService {
   }
 
   /**
-   * Получить аудитории (сегменты ретаргетинга) с названиями из базы
+   * Получить аудитории (сегменты) напрямую из VK Ads API
+   * Названия берутся из API /remarketing/segments.json
    */
   async getAudiences(userId: number, vkAccountId: number) {
     const vkAccount = await this.getVkAccount(userId, vkAccountId);
@@ -88,29 +90,17 @@ export class SegmentationService {
       return [];
     }
 
-    // Получаем сохранённые названия из базы
-    const segmentIds = segments.map((s: any) => BigInt(s.id));
-
-    let labelsMap = new Map<string, string>();
-    if (segmentIds.length > 0) {
-      const labels = await this.prisma.segmentLabel.findMany({
-        where: {
-          vkAccountId,
-          segmentId: { in: segmentIds },
-        },
-      });
-      labelsMap = new Map(labels.map(l => [l.segmentId.toString(), l.name]));
-    }
-
+    // Названия уже приходят из API!
     return segments.map((s: any) => ({
       id: s.id,
-      name: labelsMap.get(s.id.toString()) || `Сегмент ${s.id}`,
-      hasCustomName: labelsMap.has(s.id.toString()),
+      name: s.name || `Сегмент ${s.id}`,
+      hasCustomName: !!s.name, // Если есть имя из API
     }));
   }
 
   /**
-   * Получить интересы с названиями из базы
+   * Получить обычные интересы напрямую из VK Ads API (Авто, Финансы, и т.д.)
+   * Названия берутся из API /targetings_tree.json?targetings=interests
    */
   async getInterests(userId: number, vkAccountId: number) {
     const vkAccount = await this.getVkAccount(userId, vkAccountId);
@@ -120,24 +110,33 @@ export class SegmentationService {
       return [];
     }
 
-    // Получаем сохранённые названия из базы
-    const interestIds = interests.map((i: any) => i.id);
-
-    let labelsMap = new Map<number, string>();
-    if (interestIds.length > 0) {
-      const labels = await this.prisma.interestLabel.findMany({
-        where: {
-          vkAccountId,
-          interestId: { in: interestIds },
-        },
-      });
-      labelsMap = new Map(labels.map(l => [l.interestId, l.name]));
-    }
-
+    // Названия уже приходят из API!
     return interests.map((i: any) => ({
       id: i.id,
-      name: labelsMap.get(i.id) || `Интерес ${i.id}`,
-      hasCustomName: labelsMap.has(i.id),
+      name: i.name || `Интерес ${i.id}`,
+      fullName: i.fullName,
+      hasCustomName: !!i.name,
+    }));
+  }
+
+  /**
+   * Получить соц-дем интересы напрямую из VK Ads API (доход, занятость, и т.д.)
+   * Названия берутся из API /targetings_tree.json?targetings=interests_soc_dem
+   */
+  async getInterestsSocDem(userId: number, vkAccountId: number) {
+    const vkAccount = await this.getVkAccount(userId, vkAccountId);
+    const interests = await this.vkService.getInterestsSocDem(vkAccount.accessToken);
+
+    if (!interests || interests.length === 0) {
+      return [];
+    }
+
+    // Названия уже приходят из API!
+    return interests.map((i: any) => ({
+      id: i.id,
+      name: i.name || `Соц-дем ${i.id}`,
+      fullName: i.fullName,
+      hasCustomName: !!i.name,
     }));
   }
 
@@ -178,7 +177,7 @@ export class SegmentationService {
       throw new BadRequestException('Выберите хотя бы одну аудиторию');
     }
 
-    this.logger.log(`Начало сегментирования: группа ${dto.sourceAdGroupId}, аудиторий: ${dto.audienceIds.length}, интерес: ${dto.interestId || 'нет'}`);
+    this.logger.log(`Начало сегментирования: группа ${dto.sourceAdGroupId}, аудиторий: ${dto.audienceIds.length}, интерес: ${dto.interestId || 'нет'}, соц-дем: ${dto.socDemInterestId || 'нет'}`);
 
     const result: SegmentationResult = {
       success: true,
@@ -195,6 +194,12 @@ export class SegmentationService {
     let interestName: string | null = null;
     if (dto.interestId) {
       interestName = await this.getInterestName(dto.vkAccountId, dto.interestId);
+    }
+
+    // Получаем название соц-дем интереса если указан
+    let socDemInterestName: string | null = null;
+    if (dto.socDemInterestId) {
+      socDemInterestName = await this.getInterestName(dto.vkAccountId, dto.socDemInterestId);
     }
 
     // Устанавливаем токен для VkService
@@ -220,17 +225,28 @@ export class SegmentationService {
 
           // 2. Формируем новое название группы
           let newName = audienceName;
+          const nameParts: string[] = [];
           if (interestName) {
-            newName = `${audienceName} + ${interestName}`;
+            nameParts.push(interestName);
+          }
+          if (socDemInterestName) {
+            nameParts.push(socDemInterestName);
+          }
+          if (nameParts.length > 0) {
+            newName = `${audienceName} + ${nameParts.join(' + ')}`;
           }
 
-          // 3. Обновляем группу: название + targetings (только выбранная аудитория и интерес)
+          // 3. Обновляем группу: название + targetings (только выбранная аудитория и интересы)
           const targetings: any = {
             segments: [audienceId], // ОДНА аудитория
           };
 
           if (dto.interestId) {
             targetings.interests = [dto.interestId];
+          }
+
+          if (dto.socDemInterestId) {
+            targetings.interests_soc_dem = [dto.socDemInterestId];
           }
 
           await this.vkService.updateAdGroup(vkAccount.accessToken, newGroupId, {

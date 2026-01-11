@@ -16,4 +16,8 @@ export class CreateSegmentationDto {
   @IsOptional()
   @IsInt()
   interestId?: number;
+
+  @IsOptional()
+  @IsInt()
+  socDemInterestId?: number;
 }

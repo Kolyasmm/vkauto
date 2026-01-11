@@ -516,7 +516,7 @@ export default function ScalingPage() {
                       </span>
                     </div>
                     <h3 className="font-medium text-gray-900 text-sm sm:text-base truncate">
-                      {task.sourceAdGroupName || `Группа ${task.sourceAdGroupId}`}
+                      {task.sourceAdGroupName || 'Группа'} <span className="text-gray-500 font-normal">({task.sourceAdGroupId})</span>
                     </h3>
                     <div className="text-xs sm:text-sm text-gray-500 mt-1">
                       Создано {task.copiesCreated} из {task.copiesCount} копий

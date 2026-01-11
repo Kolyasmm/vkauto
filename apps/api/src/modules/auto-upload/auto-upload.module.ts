@@ -4,9 +4,10 @@ import { AutoUploadService } from './auto-upload.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { VkModule } from '../vk/vk.module';
 import { AuthModule } from '../auth/auth.module';
+import { CreativesModule } from '../creatives/creatives.module';
 
 @Module({
-  imports: [PrismaModule, VkModule, AuthModule],
+  imports: [PrismaModule, VkModule, AuthModule, CreativesModule],
   controllers: [AutoUploadController],
   providers: [AutoUploadService],
   exports: [AutoUploadService],

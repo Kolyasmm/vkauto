@@ -41,7 +41,7 @@ export class SegmentationController {
   }
 
   /**
-   * Получить доступные интересы
+   * Получить обычные интересы (Авто, Финансы, и т.д.)
    */
   @Get('interests/:vkAccountId')
   async getInterests(
@@ -49,6 +49,17 @@ export class SegmentationController {
     @Param('vkAccountId', ParseIntPipe) vkAccountId: number,
   ) {
     return this.segmentationService.getInterests(req.user.id, vkAccountId);
+  }
+
+  /**
+   * Получить соц-дем интересы (доход, занятость, и т.д.)
+   */
+  @Get('interests-soc-dem/:vkAccountId')
+  async getInterestsSocDem(
+    @Request() req,
+    @Param('vkAccountId', ParseIntPipe) vkAccountId: number,
+  ) {
+    return this.segmentationService.getInterestsSocDem(req.user.id, vkAccountId);
   }
 
   /**

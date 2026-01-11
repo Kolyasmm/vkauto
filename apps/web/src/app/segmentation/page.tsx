@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import Layout from '@/components/Layout'
 import { useVkAccount } from '@/contexts/VkAccountContext'
@@ -17,6 +17,7 @@ import {
   Pencil,
   Check,
   X,
+  Search,
 } from 'lucide-react'
 
 interface Campaign {
@@ -61,16 +62,20 @@ export default function SegmentationPage() {
   const [selectedAdGroupId, setSelectedAdGroupId] = useState<number | null>(null)
   const [selectedAudienceIds, setSelectedAudienceIds] = useState<number[]>([])
   const [selectedInterestId, setSelectedInterestId] = useState<number | null>(null)
+  const [selectedSocDemInterestId, setSelectedSocDemInterestId] = useState<number | null>(null)
   const [result, setResult] = useState<SegmentationResult | null>(null)
   const [expandedCampaignId, setExpandedCampaignId] = useState<number | null>(null)
   const [editingInterestId, setEditingInterestId] = useState<number | null>(null)
   const [editingInterestName, setEditingInterestName] = useState('')
+  const [interestSearch, setInterestSearch] = useState('')
+  const [socDemSearch, setSocDemSearch] = useState('')
 
   // Reset state when account changes
   useEffect(() => {
     setSelectedAdGroupId(null)
     setSelectedAudienceIds([])
     setSelectedInterestId(null)
+    setSelectedSocDemInterestId(null)
     setResult(null)
     setExpandedCampaignId(null)
   }, [currentAccount?.id])
@@ -107,6 +112,31 @@ export default function SegmentationPage() {
     },
     enabled: !!currentAccount,
   })
+
+  // Загрузка соц-дем интересов
+  const { data: interestsSocDem = [], isLoading: isLoadingSocDem } = useQuery<Interest[]>({
+    queryKey: ['segmentationInterestsSocDem', currentAccount?.id],
+    queryFn: async () => {
+      if (!currentAccount) return []
+      const response = await api.get(`/segmentation/interests-soc-dem/${currentAccount.id}`)
+      return response.data
+    },
+    enabled: !!currentAccount,
+  })
+
+  // Фильтрация интересов по поиску
+  const filteredInterests = useMemo(() => {
+    if (!interestSearch.trim()) return interests
+    const query = interestSearch.toLowerCase()
+    return interests.filter(interest => interest.name.toLowerCase().includes(query))
+  }, [interests, interestSearch])
+
+  // Фильтрация соц-дем интересов по поиску
+  const filteredSocDemInterests = useMemo(() => {
+    if (!socDemSearch.trim()) return interestsSocDem
+    const query = socDemSearch.toLowerCase()
+    return interestsSocDem.filter(interest => interest.name.toLowerCase().includes(query))
+  }, [interestsSocDem, socDemSearch])
 
   // Мутация для обновления названия интереса
   const updateInterestMutation = useMutation({
@@ -154,6 +184,7 @@ export default function SegmentationPage() {
         sourceAdGroupId: selectedAdGroupId,
         audienceIds: selectedAudienceIds,
         interestId: selectedInterestId || undefined,
+        socDemInterestId: selectedSocDemInterestId || undefined,
       })
       return response.data
     },
@@ -369,6 +400,17 @@ export default function SegmentationPage() {
             <p className="text-gray-500 text-sm">Нет доступных интересов</p>
           ) : (
             <div className="space-y-2">
+              {/* Поиск по интересам */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Поиск интересов..."
+                  value={interestSearch}
+                  onChange={(e) => setInterestSearch(e.target.value)}
+                  className="input w-full pl-9 text-sm"
+                />
+              </div>
               {/* Выбор интереса */}
               <div className="relative">
                 <select
@@ -380,7 +422,7 @@ export default function SegmentationPage() {
                   className="input w-full pr-10"
                 >
                   <option value="">Без интереса</option>
-                  {interests.map(interest => (
+                  {filteredInterests.map(interest => (
                     <option key={interest.id} value={interest.id}>
                       {interest.name}
                     </option>
@@ -388,12 +430,15 @@ export default function SegmentationPage() {
                 </select>
                 <Target className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
               </div>
+              {filteredInterests.length === 0 && interestSearch && (
+                <p className="text-xs text-gray-500">Ничего не найдено</p>
+              )}
 
               {/* Список интересов для редактирования */}
               <div className="mt-3 pt-3 border-t border-gray-100">
                 <p className="text-xs text-gray-500 mb-2">Переименовать интересы:</p>
                 <div className="space-y-1 max-h-32 overflow-y-auto">
-                  {interests.map(interest => (
+                  {filteredInterests.map(interest => (
                     <div key={interest.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 group">
                       {editingInterestId === interest.id ? (
                         <>
@@ -446,6 +491,58 @@ export default function SegmentationPage() {
                   ))}
                 </div>
               </div>
+            </div>
+          )}
+        </div>
+
+        {/* Шаг 4: Выбор соц-дем интереса (опционально) */}
+        <div className="card p-3 sm:p-4 mb-4">
+          <h2 className="text-base sm:text-lg font-semibold mb-3 flex items-center gap-2">
+            <span className="w-6 h-6 bg-gray-400 text-white rounded-full flex items-center justify-center text-sm">4</span>
+            Соц.дем интерес (опционально)
+          </h2>
+
+          {isLoadingSocDem ? (
+            <div className="flex items-center justify-center py-4">
+              <Loader2 className="w-6 h-6 animate-spin text-primary-600" />
+            </div>
+          ) : interestsSocDem.length === 0 ? (
+            <p className="text-gray-500 text-sm">Нет доступных соц-дем интересов</p>
+          ) : (
+            <div className="space-y-2">
+              {/* Поиск по соц-дем интересам */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Поиск соц.дем интересов..."
+                  value={socDemSearch}
+                  onChange={(e) => setSocDemSearch(e.target.value)}
+                  className="input w-full pl-9 text-sm"
+                />
+              </div>
+              <div className="relative">
+                <select
+                  value={selectedSocDemInterestId || ''}
+                  onChange={(e) => {
+                    setSelectedSocDemInterestId(e.target.value ? parseInt(e.target.value) : null)
+                    setResult(null)
+                  }}
+                  className="input w-full pr-10"
+                >
+                  <option value="">Без соц-дем интереса</option>
+                  {filteredSocDemInterests.map(interest => (
+                    <option key={interest.id} value={interest.id}>
+                      {interest.name}
+                    </option>
+                  ))}
+                </select>
+                <Target className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+              </div>
+              {filteredSocDemInterests.length === 0 && socDemSearch && (
+                <p className="text-xs text-gray-500">Ничего не найдено</p>
+              )}
+              <p className="text-xs text-gray-500">Доход, занятость и другие соц-дем характеристики</p>
             </div>
           )}
         </div>

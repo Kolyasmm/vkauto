@@ -21,7 +21,9 @@ import {
   Upload,
   Menu,
   X,
-  Layers
+  Layers,
+  TrendingUp,
+  Image
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '@/contexts/AuthContext'
@@ -31,11 +33,13 @@ import api from '@/lib/api'
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+  { name: 'Прибыльность', href: '/profitability', icon: TrendingUp },
   { name: 'Правила', href: '/rules', icon: Play },
   { name: 'Автоотключение', href: '/auto-disable', icon: Power },
   { name: 'Масштабирование', href: '/scaling', icon: Copy },
   { name: 'Сегментирование', href: '/segmentation', icon: Layers },
   { name: 'Автозалив', href: '/auto-upload', icon: Upload },
+  { name: 'Креативы', href: '/creatives', icon: Image },
   { name: 'Масс. группы', href: '/bulk-edit', icon: Settings2 },
   { name: 'Масс. объявл.', href: '/bulk-banners', icon: Megaphone },
   { name: 'История', href: '/history', icon: FileText },
@@ -130,7 +134,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           >
             <div className="flex items-center min-w-0 flex-1">
               <Users className="w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-3 text-gray-500 flex-shrink-0" />
-              <span className="truncate text-xs sm:text-sm">
+              <span className="text-xs sm:text-sm break-words">
                 {isLoading ? 'Загрузка...' : currentAccount?.name || 'Выберите аккаунт'}
               </span>
             </div>
@@ -157,7 +161,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                         setCurrentAccount(account)
                         setIsAccountDropdownOpen(false)
                       }}
-                      className="flex-1 text-left truncate text-xs sm:text-sm"
+                      className="flex-1 text-left text-xs sm:text-sm"
                     >
                       <span>{account.name}</span>
                       {account.isShared && (

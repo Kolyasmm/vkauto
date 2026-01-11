@@ -22,6 +22,8 @@ export default function RuleModal({ rule, onClose, onSuccess }: RuleModalProps) 
     minLeads: 3,
     copiesCount: 3,
     copyBudget: '' as string | number,
+    profitabilityCheck: 'cpl' as 'cpl' | 'leadstech',
+    periodDays: 1,
     runTime: '09:00',
     isActive: true,
   })
@@ -34,6 +36,8 @@ export default function RuleModal({ rule, onClose, onSuccess }: RuleModalProps) 
         minLeads: rule.minLeads,
         copiesCount: rule.copiesCount,
         copyBudget: rule.copyBudget ?? '',
+        profitabilityCheck: rule.profitabilityCheck || 'cpl',
+        periodDays: rule.periodDays || 1,
         runTime: rule.runTime,
         isActive: rule.isActive,
       })
@@ -101,46 +105,108 @@ export default function RuleModal({ rule, onClose, onSuccess }: RuleModalProps) 
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Максимальный CPL (Р)
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-3">
+              Тип проверки прибыльности
+            </label>
+            <div className="space-y-2">
+              <label className="flex items-start p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+                <input
+                  type="radio"
+                  name="profitabilityCheck"
+                  value="cpl"
+                  checked={formData.profitabilityCheck === 'cpl'}
+                  onChange={(e) => setFormData({ ...formData, profitabilityCheck: 'cpl' })}
+                  className="w-4 h-4 mt-0.5 text-primary-600 focus:ring-primary-500"
+                />
+                <div className="ml-3">
+                  <span className="block text-sm font-medium text-gray-900">По CPL из VK Ads</span>
+                  <span className="block text-xs text-gray-500 mt-0.5">
+                    Проверка по стоимости лида и количеству лидов из статистики VK
+                  </span>
+                </div>
               </label>
-              <input
-                type="number"
-                required
-                min="0"
-                step="0.01"
-                className="input"
-                value={formData.cplThreshold}
-                onChange={(e) =>
-                  setFormData({ ...formData, cplThreshold: Number(e.target.value) })
-                }
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                Группы с CPL выше этого значения не будут дублироваться
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Минимум лидов
+              <label className="flex items-start p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+                <input
+                  type="radio"
+                  name="profitabilityCheck"
+                  value="leadstech"
+                  checked={formData.profitabilityCheck === 'leadstech'}
+                  onChange={(e) => setFormData({ ...formData, profitabilityCheck: 'leadstech' })}
+                  className="w-4 h-4 mt-0.5 text-primary-600 focus:ring-primary-500"
+                />
+                <div className="ml-3">
+                  <span className="block text-sm font-medium text-gray-900">По реальной прибыльности (LeadsTech)</span>
+                  <span className="block text-xs text-gray-500 mt-0.5">
+                    Проверка реального дохода через LeadsTech (доход &gt; расход)
+                  </span>
+                </div>
               </label>
-              <input
-                type="number"
-                required
-                min="1"
-                className="input"
-                value={formData.minLeads}
-                onChange={(e) =>
-                  setFormData({ ...formData, minLeads: Number(e.target.value) })
-                }
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                Минимальное количество лидов за вчера
-              </p>
             </div>
           </div>
+
+          {formData.profitabilityCheck === 'cpl' ? (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Максимальный CPL (Р)
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="0"
+                  step="0.01"
+                  className="input"
+                  value={formData.cplThreshold}
+                  onChange={(e) =>
+                    setFormData({ ...formData, cplThreshold: Number(e.target.value) })
+                  }
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Группы с CPL выше этого значения не будут дублироваться
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Минимум лидов
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  className="input"
+                  value={formData.minLeads}
+                  onChange={(e) =>
+                    setFormData({ ...formData, minLeads: Number(e.target.value) })
+                  }
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Минимальное количество лидов за вчера
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Период проверки прибыльности
+              </label>
+              <select
+                className="input"
+                value={formData.periodDays}
+                onChange={(e) =>
+                  setFormData({ ...formData, periodDays: Number(e.target.value) })
+                }
+              >
+                <option value={1}>1 день (вчера)</option>
+                <option value={3}>3 дня</option>
+                <option value={7}>7 дней</option>
+              </select>
+              <p className="text-xs text-gray-500 mt-1">
+                За какой период проверять прибыльность через LeadsTech
+              </p>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <div>

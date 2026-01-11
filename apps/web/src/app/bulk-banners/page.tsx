@@ -55,7 +55,7 @@ export default function BulkBannersPage() {
   const [selectedBanners, setSelectedBanners] = useState<Set<number>>(new Set())
   const [expandedCampaigns, setExpandedCampaigns] = useState<Set<number>>(new Set())
   const [searchQuery, setSearchQuery] = useState('')
-  const [statusFilter, setStatusFilter] = useState<string>('')
+  const [statusFilter, setStatusFilter] = useState<string>('active')
   const [lastResult, setLastResult] = useState<BulkBannerResult | null>(null)
 
   // Параметры редактирования

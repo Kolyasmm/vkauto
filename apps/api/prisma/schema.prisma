@@ -84,6 +84,13 @@ model Rule {
   minLeads        Int            @default(3) @map("min_leads")
   copiesCount     Int            @default(3) @map("copies_count")
   copyBudget      Decimal?       @map("copy_budget") @db.Decimal(10, 2) // Бюджет для копий (null = как у оригинала)
+
+  // Тип проверки прибыльности: "cpl" (по CPL из VK Ads) или "leadstech" (реальная прибыльность через LeadsTech)
+  profitabilityCheck String      @default("cpl") @map("profitability_check")
+
+  // Период проверки в днях (для profitabilityCheck = "leadstech"): 1 = вчера, 3 = 3 дня, 7 = неделя
+  periodDays      Int            @default(1) @map("period_days")
+
   runTime         String         @default("09:00") @map("run_time")
   isActive        Boolean        @default(true) @map("is_active")
   createdAt       DateTime       @default(now()) @map("created_at")
@@ -258,6 +265,59 @@ model InterestLabel {
 
   @@unique([vkAccountId, interestId])
   @@map("interest_labels")
+}
+
+// Папки для организации креативов
+model CreativeFolder {
+  id              Int            @id @default(autoincrement())
+  userId          Int            @map("user_id")
+  name            String
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  creatives       Creative[]
+
+  @@map("creative_folders")
+}
+
+// Креативы (изображения/видео) для автозалива
+model Creative {
+  id              Int            @id @default(autoincrement())
+  userId          Int            @map("user_id")
+  folderId        Int?           @map("folder_id")
+
+  // Информация о файле
+  filename        String         // Оригинальное имя файла
+  storagePath     String         @map("storage_path") // Путь к файлу на сервере
+  mimeType        String         @map("mime_type") // image/jpeg, video/mp4 и т.д.
+  fileSize        Int            @map("file_size") // Размер в байтах
+  width           Int?           // Ширина (для изображений/видео)
+  height          Int?           // Высота (для изображений/видео)
+
+  // Метаданные
+  name            String?        // Пользовательское название
+  description     String?        // Описание
+
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  folder          CreativeFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+
+  @@map("creatives")
+}
+
+// Кэш загруженных креативов в VK Ads
+// Предотвращает повторную загрузку одного и того же креатива
+model VkCreativeCache {
+  id              Int            @id @default(autoincrement())
+  libraryCreativeId Int          @map("library_creative_id")  // ID креатива в нашей библиотеке
+  vkAccountId     Int            @map("vk_account_id")        // ID VK аккаунта
+  vkContentId     Int            @map("vk_content_id")        // ID контента в VK Ads
+  contentKey      String         @map("content_key")          // Тип контента (icon_256x256, image_600x600)
+  createdAt       DateTime       @default(now()) @map("created_at")
+
+  @@unique([libraryCreativeId, vkAccountId, contentKey])  // Один креатив может быть загружен в разных размерах
+  @@map("vk_creative_cache")
 }
 
 // Задачи ручного масштабирования групп объявлений

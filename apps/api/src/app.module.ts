@@ -16,6 +16,9 @@ import { DuplicateModule } from './modules/duplicate/duplicate.module';
 import { BulkEditModule } from './modules/bulk-edit/bulk-edit.module';
 import { AutoUploadModule } from './modules/auto-upload/auto-upload.module';
 import { SegmentationModule } from './modules/segmentation/segmentation.module';
+import { LeadsTechModule } from './modules/leadstech/leadstech.module';
+import { ProfitabilityModule } from './modules/profitability/profitability.module';
+import { CreativesModule } from './modules/creatives/creatives.module';
 
 @Module({
   imports: [
@@ -39,6 +42,9 @@ import { SegmentationModule } from './modules/segmentation/segmentation.module';
     BulkEditModule,
     AutoUploadModule,
     SegmentationModule,
+    LeadsTechModule,
+    ProfitabilityModule,
+    CreativesModule,
   ],
 })
 export class AppModule {}

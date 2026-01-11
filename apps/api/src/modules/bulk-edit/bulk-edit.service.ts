@@ -58,11 +58,11 @@ export class BulkEditService {
   async getCampaignsWithAdGroups(userId: number, vkAccountId: number) {
     const vkAccount = await this.getVkAccount(userId, vkAccountId);
 
-    // Получаем кампании
+    // Получаем кампании (только активные)
     const campaigns = await this.vkService.getCampaignsWithDetails(vkAccount.accessToken);
 
-    // Получаем все группы объявлений
-    const allAdGroups = await this.vkService.getAllAdGroupsWithToken(vkAccount.accessToken);
+    // Получаем группы объявлений - ВАЖНО: только активные чтобы не грузить все 10000+
+    const allAdGroups = await this.vkService.getAllAdGroupsWithToken(vkAccount.accessToken, undefined, 'active');
 
     // Группируем по кампаниям
     const result = campaigns.map((campaign: any) => {
@@ -85,36 +85,22 @@ export class BulkEditService {
   }
 
   /**
-   * Получить доступные аудитории (ретаргетинг) с названиями из базы
+   * Получить доступные аудитории (ретаргетинг) напрямую из VK Ads API
+   * Названия берутся из API /remarketing/segments.json
    */
   async getAudiences(userId: number, vkAccountId: number) {
     const vkAccount = await this.getVkAccount(userId, vkAccountId);
     const segments = await this.vkService.getRetargetingGroups(vkAccount.accessToken);
 
-    // Если нет сегментов, возвращаем пустой массив
     if (!segments || segments.length === 0) {
       return [];
     }
 
-    // Получаем сохранённые названия из базы
-    const segmentIds = segments.map((s: any) => BigInt(s.id));
-
-    let labelsMap = new Map<string, string>();
-    if (segmentIds.length > 0) {
-      const labels = await this.prisma.segmentLabel.findMany({
-        where: {
-          vkAccountId,
-          segmentId: { in: segmentIds },
-        },
-      });
-      labelsMap = new Map(labels.map(l => [l.segmentId.toString(), l.name]));
-    }
-
-    // Добавляем названия к сегментам
+    // Названия уже приходят из API!
     return segments.map((s: any) => ({
-      ...s,
-      name: labelsMap.get(s.id.toString()) || `Сегмент ${s.id}`,
-      hasCustomName: labelsMap.has(s.id.toString()),
+      id: s.id,
+      name: s.name || `Сегмент ${s.id}`,
+      hasCustomName: !!s.name,
     }));
   }
 
@@ -210,6 +196,7 @@ export class BulkEditService {
       // Режим работы с аудиториями/интересами
       audienceMode?: 'replace' | 'add' | 'remove';
       interestsMode?: 'replace' | 'add' | 'remove';
+      socDemMode?: 'replace' | 'add' | 'remove';
     };
   }): Promise<BulkEditResponse> {
     const vkAccount = await this.getVkAccount(userId, dto.vkAccountId);
@@ -295,7 +282,7 @@ export class BulkEditService {
 
           // Интересы соц-дем
           if (dto.changes.interestsSocDem !== undefined) {
-            const mode = dto.changes.interestsMode || 'replace';
+            const mode = dto.changes.socDemMode || 'replace';
             const currentInterestsSocDem = currentTargetings.interests_soc_dem || [];
 
             if (mode === 'replace') {
@@ -325,8 +312,28 @@ export class BulkEditService {
           updateData.name = newName;
         }
 
-        // Отправляем обновление
-        await this.vkService.updateAdGroup(vkAccount.accessToken, adGroupId, updateData);
+        // Отправляем обновление с ретраем при rate limit
+        let retries = 3;
+        let lastError: any = null;
+        while (retries > 0) {
+          try {
+            await this.vkService.updateAdGroup(vkAccount.accessToken, adGroupId, updateData);
+            break;
+          } catch (error) {
+            lastError = error;
+            // Если 429 Too Many Requests - ждём и пробуем снова
+            if (error.response?.status === 429 || error.message?.includes('429')) {
+              this.logger.warn(`Rate limit для группы ${adGroupId}, ждём 2 секунды... (осталось попыток: ${retries - 1})`);
+              await this.sleep(2000);
+              retries--;
+            } else {
+              throw error;
+            }
+          }
+        }
+        if (retries === 0 && lastError) {
+          throw lastError;
+        }
 
         results.push({
           adGroupId,
@@ -335,16 +342,19 @@ export class BulkEditService {
           success: true,
         });
 
-        // Небольшая задержка между запросами (rate limiting)
-        await this.sleep(200);
+        // Задержка между запросами (rate limiting) - 500ms достаточно для VK API
+        await this.sleep(500);
       } catch (error) {
+        this.logger.error(`Ошибка обновления группы ${adGroupId}:`, error.response?.data || error.message);
         results.push({
           adGroupId,
           adGroupName: adGroupsInfo.get(adGroupId)?.name,
           campaignName: adGroupsInfo.get(adGroupId)?.campaignName,
           success: false,
-          error: error.message || 'Неизвестная ошибка',
+          error: error.response?.data?.error?.message || error.message || 'Неизвестная ошибка',
         });
+        // Дополнительная пауза после ошибки
+        await this.sleep(1000);
       }
     }
 
@@ -376,23 +386,26 @@ export class BulkEditService {
     const campaigns = await this.vkService.getCampaignsWithDetails(vkAccount.accessToken);
     this.logger.log(`getCampaignsWithBanners: загружено ${campaigns.length} кампаний`);
 
-    // Получаем все баннеры
-    this.logger.log(`getCampaignsWithBanners: загружаем баннеры...`);
-    const allBanners = await this.vkService.getAllBannersWithTextblocks(vkAccount.accessToken, statusFilter);
+    // Получаем баннеры - ВАЖНО: по умолчанию только активные чтобы не грузить 10000+
+    const bannerStatusFilter = statusFilter || 'active';
+    this.logger.log(`getCampaignsWithBanners: загружаем баннеры (фильтр: ${bannerStatusFilter})...`);
+    const allBanners = await this.vkService.getAllBannersWithTextblocks(vkAccount.accessToken, bannerStatusFilter);
     this.logger.log(`getCampaignsWithBanners: загружено ${allBanners.length} баннеров`);
 
     // Получаем группы объявлений - нужны для связи баннер -> кампания через ad_plan_id
+    // ВАЖНО: фильтруем только активные группы чтобы не грузить все 10000+
     let adGroupsMap = new Map<number, { name: string; adPlanId: number }>();
     try {
-      const adGroups = await this.vkService.getAllAdGroupsWithToken(vkAccount.accessToken);
+      const adGroups = await this.vkService.getAllAdGroupsWithToken(
+        vkAccount.accessToken,
+        undefined,  // adPlanId - не фильтруем по кампании
+        statusFilter || 'active'  // фильтруем по статусу
+      );
       adGroupsMap = new Map(adGroups.map((ag: any) => [ag.id, { name: ag.name, adPlanId: ag.ad_plan_id }]));
-      this.logger.log(`getCampaignsWithBanners: загружено ${adGroupsMap.size} групп объявлений`);
+      this.logger.log(`getCampaignsWithBanners: загружено ${adGroupsMap.size} групп объявлений (фильтр: ${statusFilter || 'active'})`);
     } catch (error) {
       this.logger.warn(`getCampaignsWithBanners: ошибка загрузки групп: ${error.message}`);
     }
-
-    // Создаём Map кампаний по ID
-    const campaignsMap = new Map(campaigns.map((c: any) => [c.id, c]));
 
     // Группируем баннеры по кампаниям через группы объявлений
     const result = campaigns.map((campaign: any) => {
@@ -515,43 +528,62 @@ export class BulkEditService {
 
     const results: { bannerId: number; bannerName?: string; success: boolean; error?: string }[] = [];
 
-    // Получаем информацию о баннерах с textblocks
-    let bannersInfo = new Map<number, { name: string; textblocks: any }>();
+    // Получаем базовую информацию о баннерах (имена)
+    let bannersBasicInfo = new Map<number, { name: string }>();
     try {
       const allBanners = await this.vkService.getAllBannersWithTextblocks(vkAccount.accessToken);
-      bannersInfo = new Map(
+      bannersBasicInfo = new Map(
         allBanners
           .filter((b: any) => dto.bannerIds.includes(b.id))
-          .map((b: any) => [b.id, { name: b.name, textblocks: b.textblocks || {} }])
+          .map((b: any) => [b.id, { name: b.name }])
       );
-      this.logger.log(`bulkUpdateBanners: загружено ${bannersInfo.size} баннеров для обновления`);
+      this.logger.log(`bulkUpdateBanners: загружено ${bannersBasicInfo.size} баннеров для обновления`);
     } catch (error) {
-      this.logger.error(`bulkUpdateBanners: ошибка загрузки баннеров: ${error.message}`);
+      this.logger.error(`bulkUpdateBanners: ошибка загрузки базовой информации: ${error.message}`);
     }
 
     // Обновляем каждый баннер
     for (const bannerId of dto.bannerIds) {
+      const basicInfo = bannersBasicInfo.get(bannerId);
+
       try {
         const updateData: any = {};
-        const info = bannersInfo.get(bannerId);
 
         // Название баннера (поддержка шаблонов)
         if (dto.changes.name !== undefined && dto.changes.name.trim()) {
           const currentIndex = dto.bannerIds.indexOf(bannerId) + 1;
           updateData.name = dto.changes.name
-            .replace(/{name}/g, info?.name || '')
+            .replace(/{name}/g, basicInfo?.name || '')
             .replace(/{id}/g, String(bannerId))
             .replace(/{n}/g, String(currentIndex));
         }
 
         // Обновление textblocks (заголовок и/или описание)
         // VK API требует передачи ВСЕХ textblocks - они полностью замещаются
-        // ВАЖНО: разные форматы баннеров используют разные поля:
-        // - "Сообщения": title_40_vkads, text_2000
-        // - "Установка приложений": title_40_vkads, text_90, text_220
+        // ВАЖНО: получаем textblocks отдельным запросом, т.к. list API их не возвращает
         if (dto.changes.title !== undefined || dto.changes.description !== undefined) {
-          const currentTextblocks = info?.textblocks || {};
+          // Получаем детальную информацию о баннере с textblocks
+          const bannerDetails = await this.vkService.getBannerDetails(vkAccount.accessToken, bannerId);
+          // Rate limiting после GET запроса
+          await this.sleep(500);
+          const currentTextblocks = bannerDetails?.textblocks || {};
+
+          this.logger.log(`bulkUpdateBanners: баннер ${bannerId} textblocks:`, JSON.stringify(currentTextblocks));
+
+          // Проверяем есть ли вообще textblocks у баннера
+          if (Object.keys(currentTextblocks).length === 0) {
+            this.logger.warn(`bulkUpdateBanners: баннер ${bannerId} не имеет textblocks, пропускаем`);
+            results.push({
+              bannerId,
+              bannerName: basicInfo?.name,
+              success: false,
+              error: 'Баннер не имеет текстовых полей для редактирования',
+            });
+            continue;
+          }
+
           const newTextblocks = { ...currentTextblocks };
+          let hasChanges = false;
 
           // Обновляем заголовок (title_40_vkads) - универсально для всех форматов
           if (dto.changes.title !== undefined && currentTextblocks.title_40_vkads !== undefined) {
@@ -559,6 +591,7 @@ export class BulkEditService {
               text: dto.changes.title,
               title: currentTextblocks.title_40_vkads?.title || '',
             };
+            hasChanges = true;
           }
 
           // Обновляем описание - определяем какое поле использовать на основе текущих textblocks
@@ -569,6 +602,7 @@ export class BulkEditService {
                 text: dto.changes.description,
                 title: currentTextblocks.text_2000?.title || '',
               };
+              hasChanges = true;
             }
 
             // Формат "Приложения" - длинное описание 220 символов
@@ -577,6 +611,7 @@ export class BulkEditService {
                 text: dto.changes.description.slice(0, 220),
                 title: currentTextblocks.text_220?.title || '',
               };
+              hasChanges = true;
             }
 
             // Формат "Приложения" - короткое описание 90 символов
@@ -585,24 +620,32 @@ export class BulkEditService {
                 text: dto.changes.description.slice(0, 90),
                 title: currentTextblocks.text_90?.title || '',
               };
+              hasChanges = true;
             }
 
             // Проверяем что хоть одно поле описания было найдено
-            if (currentTextblocks.text_2000 === undefined &&
-                currentTextblocks.text_220 === undefined &&
-                currentTextblocks.text_90 === undefined) {
+            if (!hasChanges && dto.changes.title === undefined) {
               this.logger.warn(`bulkUpdateBanners: баннер ${bannerId} не имеет известных полей описания`);
+              results.push({
+                bannerId,
+                bannerName: basicInfo?.name,
+                success: false,
+                error: 'Баннер не имеет полей описания для редактирования',
+              });
+              continue;
             }
           }
 
-          updateData.textblocks = newTextblocks;
+          if (hasChanges) {
+            updateData.textblocks = newTextblocks;
+          }
         }
 
         // Если нечего менять - пропускаем
         if (Object.keys(updateData).length === 0) {
           results.push({
             bannerId,
-            bannerName: info?.name,
+            bannerName: basicInfo?.name,
             success: true,
           });
           continue;
@@ -614,20 +657,33 @@ export class BulkEditService {
 
         results.push({
           bannerId,
-          bannerName: info?.name,
+          bannerName: basicInfo?.name,
           success: true,
         });
 
-        // Rate limiting
-        await this.sleep(200);
+        // Rate limiting после POST запроса
+        await this.sleep(500);
       } catch (error) {
-        this.logger.error(`bulkUpdateBanners: ошибка баннера ${bannerId}: ${error.message}`);
+        // Логируем полную информацию об ошибке включая ответ VK API
+        const errorDetails = error.response?.data || error.message;
+        this.logger.error(`bulkUpdateBanners: ошибка баннера ${bannerId}:`, JSON.stringify(errorDetails));
+        // Извлекаем понятное сообщение об ошибке
+        let errorMessage = error.message || 'Неизвестная ошибка';
+        if (error.response?.data?.error?.message) {
+          errorMessage = error.response.data.error.message;
+        } else if (error.response?.data?.error?.description) {
+          errorMessage = error.response.data.error.description;
+        }
+
         results.push({
           bannerId,
-          bannerName: bannersInfo.get(bannerId)?.name,
+          bannerName: basicInfo?.name,
           success: false,
-          error: error.message || 'Неизвестная ошибка',
+          error: errorMessage,
         });
+
+        // Добавляем задержку после ошибки чтобы не попасть в rate limit
+        await this.sleep(1000);
       }
     }
 

@@ -79,6 +79,7 @@ export class BulkEditController {
         name?: string;
         audienceMode?: 'replace' | 'add' | 'remove';
         interestsMode?: 'replace' | 'add' | 'remove';
+        socDemMode?: 'replace' | 'add' | 'remove';
       };
     },
   ): Promise<BulkEditResponse> {

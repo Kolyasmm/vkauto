@@ -9,10 +9,17 @@ import { Plus, Edit, Trash2, Play, Pause, TestTube, Loader2, CheckCircle, XCircl
 import RuleModal from '@/components/RuleModal'
 import { useVkAccount } from '@/contexts/VkAccountContext'
 
+type ExecutionLog = {
+  timestamp: string
+  type: 'info' | 'success' | 'error' | 'warning'
+  message: string
+}
+
 type RunStatus = {
   ruleId: number
   status: 'running' | 'success' | 'error'
   message?: string
+  logs?: ExecutionLog[]
 }
 
 export default function RulesPage() {
@@ -49,7 +56,7 @@ export default function RulesPage() {
 
   const runMutation = useMutation({
     mutationFn: (id: number) => {
-      setRunStatus({ ruleId: id, status: 'running' })
+      setRunStatus({ ruleId: id, status: 'running', logs: [] })
       return api.post(`/rules/${id}/run`)
     },
     onSuccess: (data, ruleId) => {
@@ -57,30 +64,43 @@ export default function RulesPage() {
       const result = data.data
       setRunStatus({
         ruleId,
-        status: 'success',
-        message: `Создано ${result.copiesCreated} копий из ${result.groupsMatched} подходящих групп`
+        status: result.status === 'failed' ? 'error' : 'success',
+        message: result.status === 'failed'
+          ? result.errorMessage || 'Ошибка выполнения'
+          : `Создано ${result.copiesCreated} копий из ${result.groupsMatched} подходящих групп`,
+        logs: result.logs || []
       })
-      setTimeout(() => setRunStatus(null), 5000)
     },
     onError: (error: any, ruleId) => {
       setRunStatus({
         ruleId,
         status: 'error',
-        message: error.response?.data?.message || 'Ошибка выполнения'
+        message: error.response?.data?.message || 'Ошибка выполнения',
+        logs: error.response?.data?.logs || []
       })
-      setTimeout(() => setRunStatus(null), 5000)
     },
   })
 
   const testMutation = useMutation({
     mutationFn: (id: number) => api.post(`/rules/${id}/test`),
     onSuccess: (data) => {
-      alert(
-        `Тест завершен!\n\n` +
-        `Проверено групп: ${data.data.totalGroupsChecked}\n` +
-        `Подходят под правило: ${data.data.matchingGroups}\n` +
-        `Будет создано копий: ${data.data.wouldCreateCopies}`
-      )
+      const result = data.data
+      if (result.checkType === 'leadstech') {
+        alert(
+          `Тест завершен! (LeadsTech)\n\n` +
+          `Проверено объявлений: ${result.totalBannersChecked}\n` +
+          `Прибыльных объявлений: ${result.profitableBanners}\n` +
+          `Уникальных групп для копирования: ${result.uniqueGroups}\n` +
+          `Будет создано копий групп: ${result.wouldCreateCopies}`
+        )
+      } else {
+        alert(
+          `Тест завершен! (CPL)\n\n` +
+          `Проверено групп: ${result.totalGroupsChecked}\n` +
+          `Подходят под правило: ${result.matchingGroups}\n` +
+          `Будет создано копий: ${result.wouldCreateCopies}`
+        )
+      }
     },
   })
 
@@ -212,18 +232,37 @@ export default function RulesPage() {
                 </div>
 
                 <div className="grid grid-cols-3 gap-2 sm:gap-4 p-3 sm:p-4 bg-gray-50 rounded-lg">
-                  <div>
-                    <p className="text-xs sm:text-sm text-gray-600 mb-1">Порог CPL</p>
-                    <p className="text-sm sm:text-lg font-semibold text-gray-900">
-                      ≤ {rule.cplThreshold}₽
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs sm:text-sm text-gray-600 mb-1">Мин. лидов</p>
-                    <p className="text-sm sm:text-lg font-semibold text-gray-900">
-                      {rule.minLeads}
-                    </p>
-                  </div>
+                  {rule.profitabilityCheck === 'leadstech' ? (
+                    <>
+                      <div>
+                        <p className="text-xs sm:text-sm text-gray-600 mb-1">Проверка</p>
+                        <p className="text-sm sm:text-lg font-semibold text-green-600">
+                          LeadsTech
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs sm:text-sm text-gray-600 mb-1">Период</p>
+                        <p className="text-sm sm:text-lg font-semibold text-gray-900">
+                          {rule.periodDays === 1 ? '1 день' : `${rule.periodDays} дней`}
+                        </p>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div>
+                        <p className="text-xs sm:text-sm text-gray-600 mb-1">Порог CPL</p>
+                        <p className="text-sm sm:text-lg font-semibold text-gray-900">
+                          ≤ {rule.cplThreshold}₽
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs sm:text-sm text-gray-600 mb-1">Мин. лидов</p>
+                        <p className="text-sm sm:text-lg font-semibold text-gray-900">
+                          {rule.minLeads}
+                        </p>
+                      </div>
+                    </>
+                  )}
                   <div>
                     <p className="text-xs sm:text-sm text-gray-600 mb-1">Копий</p>
                     <p className="text-sm sm:text-lg font-semibold text-gray-900">
@@ -232,30 +271,62 @@ export default function RulesPage() {
                   </div>
                 </div>
 
-                {/* Run status notification */}
+                {/* Run status notification with logs */}
                 {runStatus?.ruleId === rule.id && (
-                  <div className={`mt-4 p-3 rounded-lg flex items-center gap-2 ${
-                    runStatus.status === 'running' ? 'bg-blue-50 text-blue-700' :
-                    runStatus.status === 'success' ? 'bg-green-50 text-green-700' :
-                    'bg-red-50 text-red-700'
-                  }`}>
-                    {runStatus.status === 'running' && (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>Правило выполняется...</span>
-                      </>
-                    )}
-                    {runStatus.status === 'success' && (
-                      <>
-                        <CheckCircle className="w-4 h-4" />
-                        <span>{runStatus.message}</span>
-                      </>
-                    )}
-                    {runStatus.status === 'error' && (
-                      <>
-                        <XCircle className="w-4 h-4" />
-                        <span>{runStatus.message}</span>
-                      </>
+                  <div className="mt-4 rounded-lg border overflow-hidden">
+                    {/* Header */}
+                    <div className={`p-3 flex items-center justify-between ${
+                      runStatus.status === 'running' ? 'bg-blue-50 text-blue-700 border-b border-blue-100' :
+                      runStatus.status === 'success' ? 'bg-green-50 text-green-700 border-b border-green-100' :
+                      'bg-red-50 text-red-700 border-b border-red-100'
+                    }`}>
+                      <div className="flex items-center gap-2">
+                        {runStatus.status === 'running' && (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <span className="font-medium">Выполняется...</span>
+                          </>
+                        )}
+                        {runStatus.status === 'success' && (
+                          <>
+                            <CheckCircle className="w-4 h-4" />
+                            <span className="font-medium">{runStatus.message}</span>
+                          </>
+                        )}
+                        {runStatus.status === 'error' && (
+                          <>
+                            <XCircle className="w-4 h-4" />
+                            <span className="font-medium">{runStatus.message}</span>
+                          </>
+                        )}
+                      </div>
+                      {runStatus.status !== 'running' && (
+                        <button
+                          onClick={() => setRunStatus(null)}
+                          className="text-gray-400 hover:text-gray-600"
+                        >
+                          <XCircle className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Logs */}
+                    {runStatus.logs && runStatus.logs.length > 0 && (
+                      <div className="bg-gray-900 text-gray-100 p-3 max-h-64 overflow-y-auto font-mono text-xs">
+                        {runStatus.logs.map((log, idx) => (
+                          <div key={idx} className={`py-0.5 ${
+                            log.type === 'error' ? 'text-red-400' :
+                            log.type === 'success' ? 'text-green-400' :
+                            log.type === 'warning' ? 'text-yellow-400' :
+                            'text-gray-300'
+                          }`}>
+                            <span className="text-gray-500 mr-2">
+                              {new Date(log.timestamp).toLocaleTimeString('ru-RU')}
+                            </span>
+                            {log.message}
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
                 )}

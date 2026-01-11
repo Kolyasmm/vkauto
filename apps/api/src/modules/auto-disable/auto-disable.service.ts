@@ -241,9 +241,12 @@ export class AutoDisableService {
       }
 
       // Вычисляем период для статистики
+      // Логика: если правило на N дней, проверяем (N-1) предыдущих дней + сегодня
+      // Например: 1 день = с 00:00 сегодня, 3 дня = с 00:00 позавчера, 7 дней = с 00:00 шести дней назад
       const dateTo = new Date();
       const dateFrom = new Date();
-      dateFrom.setDate(dateFrom.getDate() - rule.periodDays);
+      dateFrom.setDate(dateFrom.getDate() - (rule.periodDays - 1));
+      dateFrom.setHours(0, 0, 0, 0); // Устанавливаем на 00:00:00
 
       const dateFromStr = dateFrom.toISOString().split('T')[0];
       const dateToStr = dateTo.toISOString().split('T')[0];

@@ -183,7 +183,14 @@ export class VkService {
       return response;
     } catch (error) {
       // Если группа не найдена (404) - возвращаем null
-      if (error.response?.status === 404) {
+      // Проверяем разные варианты как axios может передать 404
+      if (
+        error.response?.status === 404 ||
+        error.status === 404 ||
+        error.message?.includes('404') ||
+        error.message?.includes('Not Found')
+      ) {
+        this.logger.warn(`Группа ${adGroupId} не найдена (404)`);
         return null;
       }
       throw error;
@@ -261,8 +268,11 @@ export class VkService {
 
   /**
    * Получить все группы объявлений с указанным токеном
+   * @param token - токен VK API
+   * @param adPlanId - фильтр по кампании (опционально)
+   * @param statusFilter - фильтр по статусу: 'active', 'blocked' и т.д. (опционально)
    */
-  async getAllAdGroupsWithToken(token: string, adPlanId?: number): Promise<any[]> {
+  async getAllAdGroupsWithToken(token: string, adPlanId?: number, statusFilter?: string): Promise<any[]> {
     const client = this.createApiClient(token);
     const allGroups: any[] = [];
     const limit = 100;
@@ -279,6 +289,9 @@ export class VkService {
       const params: Record<string, any> = { limit, offset, fields };
       if (adPlanId) {
         params._ad_plan_id = adPlanId;
+      }
+      if (statusFilter) {
+        params._status = statusFilter;
       }
 
       const response = await client.get('ad_groups.json', { params });
@@ -405,6 +418,28 @@ export class VkService {
   }
 
   /**
+   * Получить детальную информацию о баннере (включая textblocks)
+   * VK API возвращает textblocks только при запросе конкретного баннера
+   */
+  async getBannerDetails(token: string, bannerId: number): Promise<any> {
+    const client = this.createApiClient(token);
+
+    try {
+      const response = await client.get(`banners/${bannerId}.json`, {
+        params: {
+          fields: 'id,name,status,textblocks,package_id,ad_group_id',
+        },
+      });
+
+      this.logger.log(`getBannerDetails ${bannerId}: textblocks=${JSON.stringify(response.data?.textblocks || {})}`);
+      return response.data;
+    } catch (error) {
+      this.logger.error(`getBannerDetails ${bannerId}: ошибка: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
    * Обновить баннер (объявление) - название и/или textblocks
    * ВАЖНО: VK API требует структуру textblocks с текстовыми полями
    * Поддерживаемые ключи зависят от формата баннера (package)
@@ -520,16 +555,12 @@ export class VkService {
   }
 
   /**
-   * Создать копию группы объявлений С БАННЕРАМИ
-   * Получает ВСЕ настройки исходной группы и баннеров, создаёт новую группу с полными копиями
-   * @param adGroupId - ID исходной группы
-   * @param copyNumber - номер копии для названия
-   * @param customBudget - кастомный дневной бюджет (если не указан - копируется с оригинала)
+   * Загрузить данные группы и баннеров для кэширования
+   * Используется для массового копирования - загружаем один раз, копируем много раз
    */
-  async createAdGroupCopy(adGroupId: number, copyNumber: number = 1, customBudget?: number): Promise<any> {
-    this.logger.log(`Создание копии группы объявлений ${adGroupId} (копия ${copyNumber})${customBudget ? ` с бюджетом ${customBudget}₽` : ''}`);
+  async loadAdGroupDataForCopy(adGroupId: number): Promise<{ group: any; banners: any[] }> {
+    this.logger.log(`Загрузка данных группы ${adGroupId} для копирования...`);
 
-    // Получаем ВСЕ настройки исходной группы (кроме read-only полей)
     const groupFields = [
       'id', 'name', 'package_id', 'ad_plan_id', 'objective',
       'autobidding_mode', 'budget_limit', 'budget_limit_day',
@@ -542,16 +573,23 @@ export class VkService {
       'mixing', 'social', 'social_quota', 'banners',
     ].join(',');
 
-    const originalGroup = await this.callApi<any>(
-      `ad_groups/${adGroupId}.json`,
-      { fields: groupFields },
-    );
+    let originalGroup: any;
+    try {
+      originalGroup = await this.callApi<any>(
+        `ad_groups/${adGroupId}.json`,
+        { fields: groupFields },
+      );
+    } catch (error) {
+      if (error.response?.status === 404 || error.message?.includes('404')) {
+        throw new Error(`Группа ${adGroupId} не найдена (возможно удалена)`);
+      }
+      throw error;
+    }
 
     if (!originalGroup || !originalGroup.id) {
       throw new Error(`Не удалось получить данные группы ${adGroupId}`);
     }
 
-    // Получаем полные данные баннеров исходной группы
     const bannerFields = 'id,name,content,textblocks,urls,call_to_action,deeplink,status';
     const bannersResponse = await this.callApi<VkAdsApiResponse<any>>(
       'banners.json',
@@ -559,7 +597,40 @@ export class VkService {
     );
     const originalBanners = bannersResponse.items || [];
 
-    this.logger.log(`Найдено ${originalBanners.length} баннеров в группе ${adGroupId}`);
+    this.logger.log(`✅ Загружены данные группы ${adGroupId}: ${originalBanners.length} баннеров`);
+    return { group: originalGroup, banners: originalBanners };
+  }
+
+  /**
+   * Создать копию группы объявлений С БАННЕРАМИ
+   * Получает ВСЕ настройки исходной группы и баннеров, создаёт новую группу с полными копиями
+   * @param adGroupId - ID исходной группы
+   * @param copyNumber - номер копии для названия
+   * @param customBudget - кастомный дневной бюджет (если не указан - копируется с оригинала)
+   * @param cachedData - кэшированные данные группы и баннеров (для массового копирования)
+   */
+  async createAdGroupCopy(
+    adGroupId: number,
+    copyNumber: number = 1,
+    customBudget?: number,
+    cachedData?: { group: any; banners: any[] },
+  ): Promise<any> {
+    this.logger.log(`Создание копии группы объявлений ${adGroupId} (копия ${copyNumber})${customBudget ? ` с бюджетом ${customBudget}₽` : ''}`);
+
+    let originalGroup: any;
+    let originalBanners: any[];
+
+    // Если есть кэшированные данные - используем их, иначе загружаем
+    if (cachedData) {
+      originalGroup = cachedData.group;
+      originalBanners = cachedData.banners;
+      this.logger.log(`Используем кэшированные данные (${originalBanners.length} баннеров)`);
+    } else {
+      // Загружаем данные (для единичного копирования)
+      const data = await this.loadAdGroupDataForCopy(adGroupId);
+      originalGroup = data.group;
+      originalBanners = data.banners;
+    }
 
     // Формируем данные для новой группы - копируем ВСЕ поля
     const newGroupData: Record<string, any> = {
@@ -682,21 +753,39 @@ export class VkService {
 
     const copiedIds: number[] = [];
 
+    // ВАЖНО: Загружаем данные группы ОДИН раз перед циклом
+    // Это предотвращает 404 ошибки от VK API при повторных запросах
+    let cachedData: { group: any; banners: any[] } | undefined;
+    try {
+      cachedData = await this.loadAdGroupDataForCopy(adGroupId);
+      this.logger.log(`Данные группы ${adGroupId} закэшированы: ${cachedData.banners.length} баннеров`);
+    } catch (error) {
+      this.logger.error(`Не удалось загрузить данные группы ${adGroupId}: ${error.message}`);
+      return copiedIds; // Возвращаем пустой массив
+    }
+
     for (let i = 0; i < count; i++) {
       const copyNumber = i + 1; // Последовательная нумерация: 1, 2, 3...
       try {
-        const result = await this.createAdGroupCopy(adGroupId, copyNumber, customBudget);
+        const result = await this.createAdGroupCopy(adGroupId, copyNumber, customBudget, cachedData);
         if (result && result.id) {
           copiedIds.push(result.id);
           this.logger.log(`✅ Создана копия ${copyNumber}/${count}, ID: ${result.id}`);
         }
+        // Задержка между копиями чтобы VK API успевал обработать запросы
+        if (i < count - 1) {
+          await new Promise(resolve => setTimeout(resolve, 1500));
+        }
       } catch (error) {
         this.logger.error(`Ошибка создания копии ${copyNumber}:`, error.message);
+        // Увеличиваем задержку после ошибки
+        await new Promise(resolve => setTimeout(resolve, 2000));
       }
     }
 
     return copiedIds;
   }
+
 
   /**
    * Обновить статус группы объявлений
@@ -760,36 +849,42 @@ export class VkService {
   }
 
   /**
-   * Получить список уникальных сегментов (аудиторий) из существующих групп объявлений
-   * VK Ads API v2 не предоставляет публичного эндпоинта для списка аудиторий,
-   * поэтому собираем их из targetings групп
+   * Получить список сегментов (аудиторий) напрямую из VK Ads API
+   * Использует эндпоинт /api/v2/remarketing/segments.json
    */
   async getSegmentsFromAdGroups(token: string): Promise<any[]> {
-    this.logger.log('Получение уникальных сегментов из групп объявлений');
+    this.logger.log('Получение сегментов через VK Ads API /remarketing/segments.json');
+    const client = this.createApiClient(token);
 
     try {
-      const allAdGroups = await this.getAllAdGroupsWithToken(token);
-      const segmentsMap = new Map<number, { id: number; usedInGroups: number }>();
+      const allSegments: any[] = [];
+      const limit = 100;
+      let offset = 0;
 
-      for (const ag of allAdGroups) {
-        const segments = ag.targetings?.segments || [];
-        for (const segmentId of segments) {
-          const existing = segmentsMap.get(segmentId);
-          if (existing) {
-            existing.usedInGroups++;
-          } else {
-            segmentsMap.set(segmentId, { id: segmentId, usedInGroups: 1 });
-          }
-        }
+      while (true) {
+        const response = await client.get('remarketing/segments.json', {
+          params: { limit, offset },
+        });
+
+        const segments = response.data?.items || [];
+        if (segments.length === 0) break;
+
+        allSegments.push(...segments);
+        offset += limit;
+
+        // Безопасность: максимум 1000 сегментов
+        if (offset >= 1000) break;
+        await this.sleep(200);
       }
 
-      const result = Array.from(segmentsMap.values()).map(s => ({
+      const result = allSegments.map((s: any) => ({
         id: s.id,
-        name: `Сегмент ${s.id}`,
-        usedInGroups: s.usedInGroups,
+        name: s.name || `Сегмент ${s.id}`,
+        created: s.created,
+        updated: s.updated,
       }));
 
-      this.logger.log(`Найдено ${result.length} уникальных сегментов`);
+      this.logger.log(`Загружено ${result.length} сегментов из VK Ads API`);
       return result;
     } catch (error) {
       this.logger.error('Ошибка получения сегментов:', error.message);
@@ -798,36 +893,39 @@ export class VkService {
   }
 
   /**
-   * Получить список интересов (interest categories)
-   * VK Ads API v2 не предоставляет публичного эндпоинта,
-   * собираем уникальные значения из групп объявлений
+   * Получить обычные интересы из VK Ads API (Авто, Финансы, и т.д.)
+   * Использует эндпоинт /api/v2/targetings_tree.json?targetings=interests
    */
   async getInterests(token: string): Promise<any[]> {
-    this.logger.log('Получение уникальных интересов из групп объявлений');
+    this.logger.log('Получение интересов через VK Ads API /targetings_tree.json?targetings=interests');
+    const client = this.createApiClient(token);
 
     try {
-      const allAdGroups = await this.getAllAdGroupsWithToken(token);
-      const interestsMap = new Map<number, { id: number; usedInGroups: number }>();
+      const response = await client.get('targetings_tree.json', {
+        params: { targetings: 'interests' },
+      });
 
-      for (const ag of allAdGroups) {
-        const interests = ag.targetings?.interests || [];
-        for (const interestId of interests) {
-          const existing = interestsMap.get(interestId);
-          if (existing) {
-            existing.usedInGroups++;
-          } else {
-            interestsMap.set(interestId, { id: interestId, usedInGroups: 1 });
+      // API возвращает объект {"interests": [...]}
+      const tree = response.data?.interests || [];
+      const result: any[] = [];
+
+      // Рекурсивно собираем все интересы из дерева
+      const flattenTree = (items: any[], parentName?: string) => {
+        for (const item of items) {
+          const fullName = parentName ? `${parentName} > ${item.name}` : item.name;
+          result.push({
+            id: item.id,
+            name: item.name,
+            fullName,
+          });
+          if (item.children && item.children.length > 0) {
+            flattenTree(item.children, item.name);
           }
         }
-      }
+      };
 
-      const result = Array.from(interestsMap.values()).map(i => ({
-        id: i.id,
-        name: `Интерес ${i.id}`,
-        usedInGroups: i.usedInGroups,
-      }));
-
-      this.logger.log(`Найдено ${result.length} уникальных интересов`);
+      flattenTree(tree);
+      this.logger.log(`Загружено ${result.length} интересов из VK Ads API`);
       return result;
     } catch (error) {
       this.logger.error('Ошибка получения интересов:', error.message);
@@ -836,37 +934,42 @@ export class VkService {
   }
 
   /**
-   * Получить список интересов соц-дем из групп объявлений
+   * Получить соц-дем интересы из VK Ads API (доход, занятость, и т.д.)
+   * Использует эндпоинт /api/v2/targetings_tree.json?targetings=interests_soc_dem
    */
   async getInterestsSocDem(token: string): Promise<any[]> {
-    this.logger.log('Получение уникальных интересов соц-дем из групп объявлений');
+    this.logger.log('Получение соц-дем интересов через VK Ads API /targetings_tree.json?targetings=interests_soc_dem');
+    const client = this.createApiClient(token);
 
     try {
-      const allAdGroups = await this.getAllAdGroupsWithToken(token);
-      const interestsMap = new Map<number, { id: number; usedInGroups: number }>();
+      const response = await client.get('targetings_tree.json', {
+        params: { targetings: 'interests_soc_dem' },
+      });
 
-      for (const ag of allAdGroups) {
-        const interests = ag.targetings?.interests_soc_dem || [];
-        for (const interestId of interests) {
-          const existing = interestsMap.get(interestId);
-          if (existing) {
-            existing.usedInGroups++;
-          } else {
-            interestsMap.set(interestId, { id: interestId, usedInGroups: 1 });
+      // API возвращает объект {"interests_soc_dem": [...]}
+      const tree = response.data?.interests_soc_dem || [];
+      const result: any[] = [];
+
+      // Рекурсивно собираем все интересы из дерева
+      const flattenTree = (items: any[], parentName?: string) => {
+        for (const item of items) {
+          const fullName = parentName ? `${parentName} > ${item.name}` : item.name;
+          result.push({
+            id: item.id,
+            name: item.name,
+            fullName,
+          });
+          if (item.children && item.children.length > 0) {
+            flattenTree(item.children, item.name);
           }
         }
-      }
+      };
 
-      const result = Array.from(interestsMap.values()).map(i => ({
-        id: i.id,
-        name: `Соц-дем ${i.id}`,
-        usedInGroups: i.usedInGroups,
-      }));
-
-      this.logger.log(`Найдено ${result.length} уникальных интересов соц-дем`);
+      flattenTree(tree);
+      this.logger.log(`Загружено ${result.length} соц-дем интересов из VK Ads API`);
       return result;
     } catch (error) {
-      this.logger.error('Ошибка получения интересов соц-дем:', error.message);
+      this.logger.error('Ошибка получения соц-дем интересов:', error.message);
       return [];
     }
   }
@@ -880,19 +983,30 @@ export class VkService {
   }
 
   /**
-   * Получить вчерашнюю дату в формате YYYY-MM-DD
+   * Получить текущую дату по московскому времени (UTC+3)
+   * VK Ads API работает по московскому времени
    */
-  getYesterdayDate(): string {
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    return yesterday.toISOString().split('T')[0];
+  private getMoscowDate(): Date {
+    const now = new Date();
+    // Добавляем 3 часа к UTC для получения московского времени
+    const moscowOffset = 3 * 60 * 60 * 1000; // 3 часа в миллисекундах
+    return new Date(now.getTime() + moscowOffset);
   }
 
   /**
-   * Получить сегодняшнюю дату в формате YYYY-MM-DD
+   * Получить вчерашнюю дату в формате YYYY-MM-DD (по московскому времени)
+   */
+  getYesterdayDate(): string {
+    const moscow = this.getMoscowDate();
+    moscow.setDate(moscow.getDate() - 1);
+    return moscow.toISOString().split('T')[0];
+  }
+
+  /**
+   * Получить сегодняшнюю дату в формате YYYY-MM-DD (по московскому времени)
    */
   getTodayDate(): string {
-    return new Date().toISOString().split('T')[0];
+    return this.getMoscowDate().toISOString().split('T')[0];
   }
 
   // ============ AUTO UPLOAD METHODS ============

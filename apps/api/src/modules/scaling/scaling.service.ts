@@ -305,10 +305,21 @@ export class ScalingService implements OnModuleInit {
 
       this.logger.log(`Начало масштабирования группы ${sourceAdGroupId}, создаем ${task.copiesCount} копий`);
 
+      // ВАЖНО: Загружаем данные группы ОДИН раз перед циклом
+      // Это предотвращает 404 ошибки от VK API при повторных запросах
+      let cachedData: { group: any; banners: any[] } | undefined;
+      try {
+        cachedData = await this.vkService.loadAdGroupDataForCopy(sourceAdGroupId);
+        this.logger.log(`Данные группы ${sourceAdGroupId} закэшированы: ${cachedData.banners.length} баннеров`);
+      } catch (error) {
+        this.logger.error(`Не удалось загрузить данные группы ${sourceAdGroupId}: ${error.message}`);
+        throw error;
+      }
+
       for (let i = 0; i < task.copiesCount; i++) {
         try {
-          // Создаем копию
-          const copyResult = await this.vkService.createAdGroupCopy(sourceAdGroupId);
+          // Создаем копию, передавая закэшированные данные
+          const copyResult = await this.vkService.createAdGroupCopy(sourceAdGroupId, i + 1, undefined, cachedData);
 
           if (copyResult && copyResult.id) {
             createdCopies.push({
@@ -362,14 +373,22 @@ export class ScalingService implements OnModuleInit {
     } catch (error) {
       this.logger.error(`Ошибка задачи ${taskId}: ${error.message}`);
 
-      await this.prisma.scalingTask.update({
-        where: { id: taskId },
-        data: {
-          status: 'failed',
-          errorMessage: error.message,
-          completedAt: new Date(),
-        },
-      });
+      // Не пытаемся обновить несуществующую задачу
+      if (!(error instanceof NotFoundException)) {
+        try {
+          await this.prisma.scalingTask.update({
+            where: { id: taskId },
+            data: {
+              status: 'failed',
+              errorMessage: error.message,
+              completedAt: new Date(),
+            },
+          });
+        } catch (updateError) {
+          // Задача могла быть удалена - игнорируем ошибку
+          this.logger.warn(`Не удалось обновить задачу ${taskId}: ${updateError.message}`);
+        }
+      }
     } finally {
       this.vkService.resetAccessToken();
       this.runningTasks.delete(taskId);

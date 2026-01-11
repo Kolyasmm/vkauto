@@ -3,8 +3,15 @@ import { PrismaService } from '../prisma/prisma.service';
 import { VkService } from '../vk/vk.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { VkAccountsService } from '../vk-accounts/vk-accounts.service';
+import { ProfitabilityService } from '../profitability/profitability.service';
 import { CreateRuleDto } from './dto/create-rule.dto';
 import { UpdateRuleDto } from './dto/update-rule.dto';
+
+export interface ExecutionLog {
+  timestamp: string;
+  type: 'info' | 'success' | 'error' | 'warning';
+  message: string;
+}
 
 export interface ExecutionResult {
   groupsChecked: number;
@@ -13,6 +20,7 @@ export interface ExecutionResult {
   status: 'success' | 'partial' | 'failed';
   errorMessage?: string;
   details: any;
+  logs?: ExecutionLog[];
 }
 
 @Injectable()
@@ -24,6 +32,7 @@ export class RulesService {
     private vkService: VkService,
     private notificationsService: NotificationsService,
     private vkAccountsService: VkAccountsService,
+    private profitabilityService: ProfitabilityService,
   ) {}
 
   /**
@@ -74,6 +83,8 @@ export class RulesService {
         minLeads: dto.minLeads,
         copiesCount: dto.copiesCount,
         copyBudget: dto.copyBudget,
+        profitabilityCheck: dto.profitabilityCheck || 'cpl',
+        periodDays: dto.periodDays || 1,
         runTime: dto.runTime,
         isActive: dto.isActive ?? true,
       },
@@ -233,7 +244,14 @@ export class RulesService {
    * Использует VK Ads API (ads.vk.com)
    */
   async executeRule(ruleId: number): Promise<ExecutionResult> {
-    this.logger.log(`🚀 Выполнение правила ID: ${ruleId}`);
+    const logs: ExecutionLog[] = [];
+    const addLog = (type: ExecutionLog['type'], message: string) => {
+      const entry = { timestamp: new Date().toISOString(), type, message };
+      logs.push(entry);
+      this.logger.log(`[${type.toUpperCase()}] ${message}`);
+    };
+
+    addLog('info', `🚀 Запуск правила ID: ${ruleId}`);
 
     const rule = await this.prisma.rule.findUnique({
       where: { id: ruleId },
@@ -245,7 +263,7 @@ export class RulesService {
     });
 
     if (!rule || !rule.isActive) {
-      this.logger.warn(`Правило ${ruleId} неактивно или не найдено`);
+      addLog('error', `Правило ${ruleId} неактивно или не найдено`);
       return {
         groupsChecked: 0,
         groupsMatched: 0,
@@ -253,13 +271,14 @@ export class RulesService {
         status: 'failed',
         errorMessage: 'Правило неактивно или не найдено',
         details: {},
+        logs,
       };
     }
 
     // Устанавливаем токен из VK аккаунта для этого правила
     if (rule.vkAccount?.accessToken) {
       this.vkService.setAccessToken(rule.vkAccount.accessToken);
-      this.logger.log(`Используем токен аккаунта: ${rule.vkAccount.name}`);
+      addLog('info', `Используем аккаунт: ${rule.vkAccount.name}`);
     }
 
     const result: ExecutionResult = {
@@ -271,94 +290,163 @@ export class RulesService {
         successfulGroups: [],
         failedGroups: [],
       },
+      logs,
     };
 
     try {
       // Получаем вчерашнюю дату
       const yesterday = this.vkService.getYesterdayDate();
 
-      // Получаем только АКТИВНЫЕ группы объявлений (с пагинацией)
-      const adGroups = await this.vkService.getActiveAdGroups();
-      result.groupsChecked = adGroups.length;
+      // Собираем прибыльные группы (ad_group_id) из прибыльных баннеров
+      const profitableGroupsSet = new Set<number>(); // Убираем дубли
+      const profitableGroupsData = new Map<number, { name: string; goals?: number; cpl?: number; profit?: number; roi?: number; bannerId: number }>();
 
-      this.logger.log(`Проверяем ${adGroups.length} активных групп объявлений`);
+      // Выбираем метод проверки прибыльности
+      if (rule.profitabilityCheck === 'leadstech') {
+        // ====== ПРОВЕРКА ЧЕРЕЗ LEADSTECH (реальная прибыльность) ======
+        const periodDays = rule.periodDays || 1;
+        addLog('info', `🎯 Проверка через LeadsTech (период: ${periodDays} дней)`);
 
-      // Получаем ID всех групп для статистики
-      const adGroupIds = adGroups.map((group) => group.id);
-
-      // Получаем статистику за вчера
-      const statistics = await this.vkService.getStatistics(
-        yesterday,
-        yesterday,
-        adGroupIds,
-        'ad_group',
-      );
-
-      // Создаем map для быстрого поиска статистики
-      const statsMap = new Map<number, any>();
-      for (const stat of statistics) {
-        statsMap.set(stat.id, stat);
-      }
-
-      // Проверяем каждую группу на соответствие условиям
-      for (const group of adGroups) {
-        const stat = statsMap.get(group.id);
-
-        if (!stat || !stat.total || !stat.total.base) {
-          continue;
-        }
-
-        // VK Реклама хранит результаты в vk.goals, а не в goals
-        const vkData = stat.total.base.vk || {};
-        const goals = vkData.goals || stat.total.base.goals || 0;
-        const spent = parseFloat(stat.total.base.spent) || 0;
-        const cpl = this.vkService.calculateCPL(spent, goals);
-
-        this.logger.debug(
-          `Группа ${group.id} (${group.name}): результатов=${goals}, CPL=${cpl.toFixed(2)}₽`,
+        // Получаем прибыльные баннеры через LeadsTech (доход > расход)
+        const profitableBanners = await this.profitabilityService.getProfitableBanners(
+          rule.userId,
+          rule.vkAccountId,
+          periodDays,
         );
 
-        // Проверяем условия правила
-        if (
-          goals >= rule.minLeads &&
-          cpl < parseFloat(rule.cplThreshold.toString())
-        ) {
-          this.logger.log(
-            `✅ Группа ${group.id} подходит под правило! Создаём ${rule.copiesCount} копий`,
+        result.groupsChecked = profitableBanners.length;
+        addLog('info', `Найдено ${profitableBanners.length} прибыльных объявлений`);
+
+        // Собираем уникальные группы из прибыльных баннеров
+        for (const banner of profitableBanners) {
+          const adGroupId = banner.adGroupId;
+
+          if (adGroupId && banner.profit > 0) {
+            addLog('success', `Баннер ${banner.bannerId}: прибыль ${banner.profit.toFixed(2)}₽, ROI ${banner.roi.toFixed(0)}% → группа ${adGroupId}`);
+
+            profitableGroupsSet.add(adGroupId);
+
+            // Сохраняем данные о первом прибыльном баннере группы
+            if (!profitableGroupsData.has(adGroupId)) {
+              profitableGroupsData.set(adGroupId, {
+                name: banner.bannerName || `Группа ${adGroupId}`,
+                profit: banner.profit,
+                roi: banner.roi,
+                bannerId: banner.bannerId,
+              });
+            }
+          }
+        }
+      } else {
+        // ====== ПРОВЕРКА ПО CPL (классическая логика) ======
+        addLog('info', `🎯 Проверка по CPL (порог: ${rule.cplThreshold}₽, мин. лидов: ${rule.minLeads})`);
+
+        // Получаем только АКТИВНЫЕ баннеры (объявления)
+        const banners = await this.vkService.getAllActiveBanners();
+        result.groupsChecked = banners.length;
+
+        addLog('info', `Найдено ${banners.length} активных объявлений`);
+
+        // Получаем ID всех баннеров для статистики
+        const bannerIds = banners.map((banner) => banner.id);
+
+        // Получаем статистику за вчера по баннерам
+        const statistics = await this.vkService.getStatistics(
+          yesterday,
+          yesterday,
+          bannerIds,
+          'banner',
+        );
+
+        // Создаем map для быстрого поиска статистики
+        const statsMap = new Map<number, any>();
+        for (const stat of statistics) {
+          statsMap.set(stat.id, stat);
+        }
+
+        // Проверяем каждый баннер на соответствие условиям
+        for (const banner of banners) {
+          const stat = statsMap.get(banner.id);
+
+          if (!stat || !stat.total || !stat.total.base) {
+            continue;
+          }
+
+          // VK Реклама хранит результаты в vk.goals
+          const vkData = stat.total.base.vk || {};
+          const goals = vkData.goals || stat.total.base.goals || 0;
+          const spent = parseFloat(stat.total.base.spent) || 0;
+          const cpl = this.vkService.calculateCPL(spent, goals);
+
+          // Проверяем условия правила
+          if (
+            goals >= rule.minLeads &&
+            cpl < parseFloat(rule.cplThreshold.toString())
+          ) {
+            const bannerWithGroup = banner as any;
+            const adGroupId = bannerWithGroup.ad_group_id;
+
+            if (adGroupId) {
+              addLog('success', `Баннер ${banner.id}: лиды=${goals}, CPL=${cpl.toFixed(2)}₽ → группа ${adGroupId}`);
+
+              profitableGroupsSet.add(adGroupId);
+
+              // Сохраняем данные о первом прибыльном баннере группы
+              if (!profitableGroupsData.has(adGroupId)) {
+                profitableGroupsData.set(adGroupId, {
+                  name: `Группа ${adGroupId}`,
+                  goals,
+                  cpl: parseFloat(cpl.toFixed(2)),
+                  bannerId: banner.id,
+                });
+              }
+            }
+          }
+        }
+      }
+
+      // Дублируем каждую уникальную прибыльную группу
+      const profitableGroups = Array.from(profitableGroupsSet);
+      addLog('info', `📋 Очередь на дублирование: ${profitableGroups.length} групп (по ${rule.copiesCount} копий каждая)`);
+
+      for (let i = 0; i < profitableGroups.length; i++) {
+        const adGroupId = profitableGroups[i];
+        const groupData = profitableGroupsData.get(adGroupId);
+        if (!groupData) continue;
+
+        result.groupsMatched++;
+        addLog('info', `[${i + 1}/${profitableGroups.length}] Копирую группу ${adGroupId} (${groupData.name})...`);
+
+        try {
+          // Создаём копии группы с заданным бюджетом (или оригинальным, если не указан)
+          const copyBudget = rule.copyBudget ? parseFloat(rule.copyBudget.toString()) : undefined;
+          const copiedIds = await this.vkService.createAdGroupCopies(
+            adGroupId,
+            rule.copiesCount,
+            copyBudget,
           );
 
-          result.groupsMatched++;
+          result.copiesCreated += copiedIds.length;
 
-          try {
-            // Создаём копии с заданным бюджетом (или оригинальным, если не указан)
-            const copyBudget = rule.copyBudget ? parseFloat(rule.copyBudget.toString()) : undefined;
-            const copiedIds = await this.vkService.createAdGroupCopies(
-              group.id,
-              rule.copiesCount,
-              copyBudget,
-            );
+          result.details.successfulGroups.push({
+            originalId: adGroupId,
+            name: groupData.name,
+            copiedIds,
+            goals: groupData.goals,
+            cpl: groupData.cpl,
+            profit: groupData.profit,
+            roi: groupData.roi,
+          });
 
-            result.copiesCreated += copiedIds.length;
-
-            result.details.successfulGroups.push({
-              originalId: group.id,
-              name: group.name,
-              copiedIds,
-              goals,
-              cpl: parseFloat(cpl.toFixed(2)),
-            });
-          } catch (error) {
-            this.logger.error(
-              `Ошибка при создании копий для группы ${group.id}:`,
-              error.message,
-            );
-            result.details.failedGroups.push({
-              originalId: group.id,
-              name: group.name,
-              error: error.message,
-            });
-            result.status = 'partial';
-          }
+          addLog('success', `✅ Группа ${adGroupId}: создано ${copiedIds.length} копий (ID: ${copiedIds.join(', ')})`);
+        } catch (error) {
+          addLog('error', `❌ Группа ${adGroupId}: ${error.message}`);
+          result.details.failedGroups.push({
+            originalId: adGroupId,
+            name: groupData.name,
+            error: error.message,
+          });
+          result.status = 'partial';
         }
       }
 
@@ -396,13 +484,11 @@ export class RulesService {
         );
       }
 
-      this.logger.log(
-        `✅ Правило ${ruleId} выполнено. Создано ${result.copiesCreated} копий из ${result.groupsMatched} подходящих групп`,
-      );
+      addLog('success', `🏁 Готово! Создано ${result.copiesCreated} копий из ${result.groupsMatched} групп`);
 
       return result;
     } catch (error) {
-      this.logger.error(`Ошибка выполнения правила ${ruleId}:`, error.message);
+      addLog('error', `💥 Критическая ошибка: ${error.message}`);
 
       // Сохраняем ошибку
       await this.prisma.ruleExecution.create({
@@ -421,6 +507,7 @@ export class RulesService {
         ...result,
         status: 'failed',
         errorMessage: error.message,
+        logs,
       };
     } finally {
       // Сбрасываем токен к дефолтному после выполнения
@@ -450,6 +537,52 @@ export class RulesService {
     }
 
     try {
+      // Если выбран режим LeadsTech - проверяем объявления через LeadsTech
+      if (rule.profitabilityCheck === 'leadstech') {
+        const periodDays = rule.periodDays || 1;
+        this.logger.log(`🎯 Тест: проверяем прибыльность через LeadsTech (период: ${periodDays} дней, rule.periodDays=${rule.periodDays})`);
+
+        // Получаем полную статистику прибыльности через LeadsTech
+        const profitabilityResult = await this.profitabilityService.getProfitability(
+          rule.userId,
+          rule.vkAccountId,
+          periodDays,
+        );
+
+        const profitableBanners = profitabilityResult.profitable;
+        this.logger.log(`Найдено ${profitableBanners.length} прибыльных баннеров из ${profitabilityResult.summary.totalBanners} проверенных`);
+
+        // Собираем уникальные группы
+        const profitableGroupsSet = new Set<number>();
+        const matchingGroups = [];
+
+        for (const banner of profitableBanners) {
+          const adGroupId = banner.adGroupId;
+          if (adGroupId && banner.profit > 0 && !profitableGroupsSet.has(adGroupId)) {
+            profitableGroupsSet.add(adGroupId);
+            matchingGroups.push({
+              adGroupId,
+              name: banner.bannerName || `Группа ${adGroupId}`,
+              bannerId: banner.bannerId,
+              profit: banner.profit,
+              roi: banner.roi,
+              wouldCreateCopies: rule.copiesCount,
+            });
+          }
+        }
+
+        return {
+          checkType: 'leadstech',
+          totalBannersChecked: profitabilityResult.summary.totalBanners,
+          profitableBanners: profitableBanners.length,
+          uniqueGroups: matchingGroups.length,
+          wouldCreateCopies: matchingGroups.length * rule.copiesCount,
+          details: matchingGroups,
+          period: profitabilityResult.period,
+        };
+      }
+
+      // Иначе проверяем по CPL (классический режим)
       const yesterday = this.vkService.getYesterdayDate();
 
       // Получаем только АКТИВНЫЕ группы объявлений (с пагинацией)
@@ -501,6 +634,7 @@ export class RulesService {
       }
 
       return {
+        checkType: 'cpl',
         totalGroupsChecked: adGroups.length,
         matchingGroups: matchingGroups.length,
         wouldCreateCopies: matchingGroups.length * rule.copiesCount,

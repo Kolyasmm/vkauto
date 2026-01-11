@@ -77,17 +77,23 @@ export default function BulkEditPage() {
   const [lastResult, setLastResult] = useState<BulkEditResult | null>(null)
 
   // Параметры редактирования
-  const [editMode, setEditMode] = useState<'audiences' | 'interests' | 'budget' | 'name'>('audiences')
+  const [editMode, setEditMode] = useState<'audiences' | 'interests' | 'socDem' | 'budget' | 'name'>('audiences')
   const [selectedAudiences, setSelectedAudiences] = useState<number[]>([])
   const [selectedInterests, setSelectedInterests] = useState<number[]>([])
+  const [selectedSocDemInterests, setSelectedSocDemInterests] = useState<number[]>([])
   const [budgetLimitDay, setBudgetLimitDay] = useState<string>('')
   const [newName, setNewName] = useState<string>('')
   const [audienceMode, setAudienceMode] = useState<'replace' | 'add' | 'remove'>('replace')
   const [interestsMode, setInterestsMode] = useState<'replace' | 'add' | 'remove'>('replace')
+  const [socDemMode, setSocDemMode] = useState<'replace' | 'add' | 'remove'>('replace')
 
   // Редактирование названий сегментов
   const [editingSegmentId, setEditingSegmentId] = useState<number | null>(null)
   const [editingSegmentName, setEditingSegmentName] = useState('')
+
+  // Поиск по интересам
+  const [interestSearch, setInterestSearch] = useState('')
+  const [socDemSearch, setSocDemSearch] = useState('')
 
   // Загрузка кампаний с группами
   const { data: campaigns = [], isLoading: campaignsLoading } = useQuery({
@@ -122,6 +128,17 @@ export default function BulkEditPage() {
     enabled: !!currentAccount?.id,
   })
 
+  // Загрузка соц-дем интересов
+  const { data: interestsSocDem = [], isLoading: socDemLoading } = useQuery({
+    queryKey: ['bulk-edit-interests-soc-dem', currentAccount?.id],
+    queryFn: async () => {
+      if (!currentAccount?.id) return []
+      const res = await api.get(`/bulk-edit/interests-soc-dem/${currentAccount.id}`)
+      return res.data as Interest[]
+    },
+    enabled: !!currentAccount?.id,
+  })
+
   // Фильтрация кампаний по поиску
   const filteredCampaigns = useMemo(() => {
     if (!searchQuery.trim()) return campaigns
@@ -135,6 +152,20 @@ export default function BulkEditPage() {
       }))
       .filter(campaign => campaign.adGroups.length > 0 || campaign.name.toLowerCase().includes(query))
   }, [campaigns, searchQuery])
+
+  // Фильтрация интересов по поиску
+  const filteredInterests = useMemo(() => {
+    if (!interestSearch.trim()) return interests
+    const query = interestSearch.toLowerCase()
+    return interests.filter(interest => interest.name.toLowerCase().includes(query))
+  }, [interests, interestSearch])
+
+  // Фильтрация соц-дем интересов по поиску
+  const filteredSocDemInterests = useMemo(() => {
+    if (!socDemSearch.trim()) return interestsSocDem
+    const query = socDemSearch.toLowerCase()
+    return interestsSocDem.filter(interest => interest.name.toLowerCase().includes(query))
+  }, [interestsSocDem, socDemSearch])
 
   // Подсчет всех групп
   const totalAdGroups = useMemo(() => {
@@ -218,6 +249,11 @@ export default function BulkEditPage() {
         changes.interestsMode = interestsMode
       }
 
+      if (editMode === 'socDem' && selectedSocDemInterests.length > 0) {
+        changes.interestsSocDem = selectedSocDemInterests
+        changes.socDemMode = socDemMode
+      }
+
       if (editMode === 'budget' && budgetLimitDay) {
         changes.budgetLimitDay = parseFloat(budgetLimitDay)
       }
@@ -245,11 +281,12 @@ export default function BulkEditPage() {
 
     if (editMode === 'audiences' && selectedAudiences.length === 0) return false
     if (editMode === 'interests' && selectedInterests.length === 0) return false
+    if (editMode === 'socDem' && selectedSocDemInterests.length === 0) return false
     if (editMode === 'budget' && (!budgetLimitDay || parseFloat(budgetLimitDay) <= 0)) return false
     if (editMode === 'name' && !newName.trim()) return false
 
     return true
-  }, [selectedAdGroups, editMode, selectedAudiences, selectedInterests, budgetLimitDay, newName])
+  }, [selectedAdGroups, editMode, selectedAudiences, selectedInterests, selectedSocDemInterests, budgetLimitDay, newName])
 
   // Обработка применения изменений
   const handleApply = () => {
@@ -437,6 +474,17 @@ export default function BulkEditPage() {
                   <span className="text-xs">Интересы</span>
                 </button>
                 <button
+                  onClick={() => setEditMode('socDem')}
+                  className={`flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg border transition-colors ${
+                    editMode === 'socDem'
+                      ? 'border-primary-500 bg-primary-50 text-primary-700'
+                      : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                  }`}
+                >
+                  <Users className="w-4 h-4 flex-shrink-0" />
+                  <span className="text-xs">Соц.дем</span>
+                </button>
+                <button
                   onClick={() => setEditMode('budget')}
                   className={`flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg border transition-colors ${
                     editMode === 'budget'
@@ -449,7 +497,7 @@ export default function BulkEditPage() {
                 </button>
                 <button
                   onClick={() => setEditMode('name')}
-                  className={`flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg border transition-colors ${
+                  className={`flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg border transition-colors col-span-2 ${
                     editMode === 'name'
                       ? 'border-primary-500 bg-primary-50 text-primary-700'
                       : 'border-gray-200 text-gray-600 hover:border-gray-300'
@@ -627,8 +675,24 @@ export default function BulkEditPage() {
                         Нет доступных интересов
                       </div>
                     ) : (
+                      <>
+                      {/* Поиск по интересам */}
+                      <div className="relative mb-2">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                        <input
+                          type="text"
+                          placeholder="Поиск..."
+                          value={interestSearch}
+                          onChange={(e) => setInterestSearch(e.target.value)}
+                          className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        />
+                      </div>
                       <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg">
-                        {interests.map((interest) => (
+                        {filteredInterests.length === 0 ? (
+                          <div className="text-sm text-gray-500 py-4 text-center">
+                            Ничего не найдено
+                          </div>
+                        ) : filteredInterests.map((interest) => (
                           <label
                             key={interest.id}
                             className={`flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer ${
@@ -656,12 +720,98 @@ export default function BulkEditPage() {
                           </label>
                         ))}
                       </div>
+                      </>
                     )}
                     {selectedInterests.length > 0 && (
                       <div className="text-sm text-primary-600 mt-2">
                         Выбрано: {selectedInterests.length}
                       </div>
                     )}
+                  </div>
+                </div>
+              )}
+
+              {/* Настройки соц-дем интересов */}
+              {editMode === 'socDem' && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Режим
+                    </label>
+                    <select
+                      value={socDemMode}
+                      onChange={(e) => setSocDemMode(e.target.value as any)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    >
+                      <option value="replace">Заменить</option>
+                      <option value="add">Добавить</option>
+                      <option value="remove">Удалить</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Соц.дем интересы
+                    </label>
+                    {socDemLoading ? (
+                      <div className="flex items-center justify-center py-4">
+                        <Loader2 className="w-4 h-4 animate-spin text-primary-600" />
+                      </div>
+                    ) : interestsSocDem.length === 0 ? (
+                      <div className="text-sm text-gray-500 py-4 text-center">
+                        Нет доступных соц-дем интересов
+                      </div>
+                    ) : (
+                      <>
+                      {/* Поиск по соц-дем интересам */}
+                      <div className="relative mb-2">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                        <input
+                          type="text"
+                          placeholder="Поиск..."
+                          value={socDemSearch}
+                          onChange={(e) => setSocDemSearch(e.target.value)}
+                          className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        />
+                      </div>
+                      <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg">
+                        {filteredSocDemInterests.length === 0 ? (
+                          <div className="text-sm text-gray-500 py-4 text-center">
+                            Ничего не найдено
+                          </div>
+                        ) : filteredSocDemInterests.map((interest) => (
+                          <label
+                            key={interest.id}
+                            className={`flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer ${
+                              interest.parent_id ? 'pl-6' : ''
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedSocDemInterests.includes(interest.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedSocDemInterests([...selectedSocDemInterests, interest.id])
+                                } else {
+                                  setSelectedSocDemInterests(selectedSocDemInterests.filter(id => id !== interest.id))
+                                }
+                              }}
+                              className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500"
+                            />
+                            <span className="text-sm text-gray-900 truncate">{interest.name}</span>
+                          </label>
+                        ))}
+                      </div>
+                      </>
+                    )}
+                    {selectedSocDemInterests.length > 0 && (
+                      <div className="text-sm text-primary-600 mt-2">
+                        Выбрано: {selectedSocDemInterests.length}
+                      </div>
+                    )}
+                    <p className="text-xs text-gray-500 mt-1">
+                      Доход, занятость и другие соц-дем характеристики
+                    </p>
                   </div>
                 </div>
               )}

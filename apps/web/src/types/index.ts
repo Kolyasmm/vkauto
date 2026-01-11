@@ -31,6 +31,8 @@ export interface Rule {
   minLeads: number
   copiesCount: number
   copyBudget?: number | null  // Бюджет для копий (null = как у оригинала)
+  profitabilityCheck?: 'cpl' | 'leadstech'  // Тип проверки прибыльности
+  periodDays?: number  // Период проверки для LeadsTech (1, 3 или 7 дней)
   runTime: string
   isActive: boolean
   createdAt: string
