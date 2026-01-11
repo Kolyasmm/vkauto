@@ -314,6 +314,11 @@ export class RulesService {
           periodDays,
         );
 
+        // ВАЖНО: profitabilityService сбрасывает токен в finally, восстанавливаем его
+        if (rule.vkAccount?.accessToken) {
+          this.vkService.setAccessToken(rule.vkAccount.accessToken);
+        }
+
         result.groupsChecked = profitableBanners.length;
         addLog('info', `Найдено ${profitableBanners.length} прибыльных объявлений`);
 
