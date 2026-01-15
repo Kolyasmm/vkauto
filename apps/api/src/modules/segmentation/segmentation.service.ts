@@ -187,19 +187,19 @@ export class SegmentationService {
       totalRequested: dto.audienceIds.length,
     };
 
-    // Получаем названия аудиторий из базы
-    const audienceLabels = await this.getAudienceLabels(dto.vkAccountId, dto.audienceIds);
+    // Получаем названия аудиторий из VK API
+    const audienceLabels = await this.getAudienceLabels(vkAccount.accessToken, dto.vkAccountId, dto.audienceIds);
 
     // Получаем название интереса если указан
     let interestName: string | null = null;
     if (dto.interestId) {
-      interestName = await this.getInterestName(dto.vkAccountId, dto.interestId);
+      interestName = await this.getInterestName(vkAccount.accessToken, dto.interestId, false);
     }
 
     // Получаем название соц-дем интереса если указан
     let socDemInterestName: string | null = null;
     if (dto.socDemInterestId) {
-      socDemInterestName = await this.getInterestName(dto.vkAccountId, dto.socDemInterestId);
+      socDemInterestName = await this.getInterestName(vkAccount.accessToken, dto.socDemInterestId, true);
     }
 
     // Устанавливаем токен для VkService
@@ -287,19 +287,33 @@ export class SegmentationService {
   }
 
   /**
-   * Получить названия аудиторий из SegmentLabel
+   * Получить названия аудиторий из VK API (с кэшем в SegmentLabel)
    */
-  private async getAudienceLabels(vkAccountId: number, audienceIds: number[]): Promise<Map<number, string>> {
-    const labels = await this.prisma.segmentLabel.findMany({
-      where: {
-        vkAccountId,
-        segmentId: { in: audienceIds.map(id => BigInt(id)) },
-      },
-    });
-
+  private async getAudienceLabels(token: string, vkAccountId: number, audienceIds: number[]): Promise<Map<number, string>> {
     const result = new Map<number, string>();
-    for (const label of labels) {
-      result.set(Number(label.segmentId), label.name);
+
+    // Сначала получаем названия из VK API
+    const segments = await this.vkService.getRetargetingGroups(token);
+
+    for (const segment of segments) {
+      if (audienceIds.includes(segment.id) && segment.name) {
+        result.set(segment.id, segment.name);
+      }
+    }
+
+    // Если что-то не нашли в API - пробуем в базе (пользовательские названия)
+    const missingIds = audienceIds.filter(id => !result.has(id));
+    if (missingIds.length > 0) {
+      const labels = await this.prisma.segmentLabel.findMany({
+        where: {
+          vkAccountId,
+          segmentId: { in: missingIds.map(id => BigInt(id)) },
+        },
+      });
+
+      for (const label of labels) {
+        result.set(Number(label.segmentId), label.name);
+      }
     }
 
     // Для аудиторий без названия используем "Аудитория {id}"
@@ -313,19 +327,17 @@ export class SegmentationService {
   }
 
   /**
-   * Получить название интереса из базы или по умолчанию
+   * Получить название интереса из VK API
    */
-  private async getInterestName(vkAccountId: number, interestId: number): Promise<string> {
+  private async getInterestName(token: string, interestId: number, isSocDem: boolean = false): Promise<string> {
     try {
-      const label = await this.prisma.interestLabel.findUnique({
-        where: {
-          vkAccountId_interestId: {
-            vkAccountId,
-            interestId,
-          },
-        },
-      });
-      return label?.name || `Интерес ${interestId}`;
+      // Получаем интересы из VK API
+      const interests = isSocDem
+        ? await this.vkService.getInterestsSocDem(token)
+        : await this.vkService.getInterests(token);
+
+      const interest = interests.find((i: any) => i.id === interestId);
+      return interest?.name || `Интерес ${interestId}`;
     } catch {
       return `Интерес ${interestId}`;
     }
