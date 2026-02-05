@@ -240,16 +240,15 @@ export class AutoDisableService {
         return result;
       }
 
-      // Вычисляем период для статистики
+      // Вычисляем период для статистики по московскому времени (VK API работает по МСК)
       // Логика: если правило на N дней, проверяем (N-1) предыдущих дней + сегодня
       // Например: 1 день = с 00:00 сегодня, 3 дня = с 00:00 позавчера, 7 дней = с 00:00 шести дней назад
-      const dateTo = new Date();
-      const dateFrom = new Date();
-      dateFrom.setDate(dateFrom.getDate() - (rule.periodDays - 1));
-      dateFrom.setHours(0, 0, 0, 0); // Устанавливаем на 00:00:00
+      const moscowNow = this.getMoscowDate();
+      const dateToStr = this.formatDateString(moscowNow);
 
-      const dateFromStr = dateFrom.toISOString().split('T')[0];
-      const dateToStr = dateTo.toISOString().split('T')[0];
+      const dateFrom = new Date(moscowNow);
+      dateFrom.setDate(dateFrom.getDate() - (rule.periodDays - 1));
+      const dateFromStr = this.formatDateString(dateFrom);
 
       // Получаем статистику по БАННЕРАМ (объявлениям)
       const bannerIds = activeBanners.map((b) => b.id);
@@ -431,5 +430,22 @@ export class AutoDisableService {
       { value: 'gt', label: '> (больше)' },
       { value: 'gte', label: '≥ (больше или равно)' },
     ];
+  }
+
+  /**
+   * Получить текущую дату в московском времени (UTC+3)
+   * VK API работает по московскому времени
+   */
+  private getMoscowDate(): Date {
+    const now = new Date();
+    const moscowOffset = 3 * 60 * 60 * 1000; // 3 часа в миллисекундах
+    return new Date(now.getTime() + moscowOffset);
+  }
+
+  /**
+   * Форматировать дату в строку YYYY-MM-DD
+   */
+  private formatDateString(date: Date): string {
+    return date.toISOString().split('T')[0];
   }
 }
