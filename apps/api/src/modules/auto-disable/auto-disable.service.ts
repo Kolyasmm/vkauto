@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { VkService } from '../vk/vk.service';
+import { VkService, AdStatistics } from '../vk/vk.service';
 import { VkAccountsService } from '../vk-accounts/vk-accounts.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CreateAutoDisableRuleDto } from './dto/create-auto-disable-rule.dto';
@@ -254,49 +254,76 @@ export class AutoDisableService {
       const bannerIds = activeBanners.map((b) => b.id);
       const stats = await this.vkService.getStatistics(dateFromStr, dateToStr, bannerIds, 'banner');
 
-      this.logger.log(`Получена статистика для ${stats.length} баннеров`);
+      this.logger.log(`Получена статистика для ${stats.length} баннеров (из ${activeBanners.length} активных)`);
+      this.logger.log(`Условие правила: ${rule.metricType} ${rule.operator} ${rule.threshold}, мин. бюджет: ${rule.minSpent}₽, период: ${dateFromStr} — ${dateToStr}`);
+
+      // Создаём map для быстрого поиска статистики
+      const statsMap = new Map<number, AdStatistics>();
+      for (const stat of stats) {
+        statsMap.set(stat.id, stat);
+      }
+
+      const threshold = Number(rule.threshold);
+      const minSpent = Number(rule.minSpent);
+      let skippedNoStats = 0;
+      let skippedLowSpent = 0;
+      let skippedConditionNotMet = 0;
 
       // Проверяем каждый баннер
-      // Логика: "если потрачено >= X И метрика (клики/результаты/CTR) < порога"
       for (const banner of activeBanners) {
-        const stat = stats.find((s) => s.id === banner.id);
-        if (!stat || !stat.total?.base) continue;
+        const stat = statsMap.get(banner.id);
 
-        const base = stat.total.base;
-        const spent = parseFloat(base.spent) || 0;
-        const minSpent = Number(rule.minSpent);
+        // Если нет статистики — суммируем из rows вручную
+        let spent = 0;
+        let clicks = 0;
+        let shows = 0;
+        let goals = 0;
+
+        if (stat?.total?.base) {
+          const base = stat.total.base;
+          const baseAny = base as any;
+          const vkData = baseAny.vk || {};
+          spent = parseFloat(base.spent) || 0;
+          clicks = baseAny.clicks || 0;
+          shows = baseAny.shows || 0;
+          goals = vkData.goals || baseAny.goals || 0;
+        } else if (stat?.rows && stat.rows.length > 0) {
+          // Fallback: суммируем из дневных строк если total отсутствует
+          for (const row of stat.rows) {
+            const rowBase = row.base as any;
+            if (!rowBase) continue;
+            spent += parseFloat(rowBase.spent) || 0;
+            clicks += rowBase.clicks || 0;
+            shows += rowBase.shows || 0;
+            const rowVk = rowBase.vk || {};
+            goals += rowVk.goals || rowBase.goals || 0;
+          }
+          this.logger.warn(`Баннер ${banner.id}: total отсутствует, суммировали из ${stat.rows.length} дневных строк (spent=${spent.toFixed(2)})`);
+        } else {
+          skippedNoStats++;
+          continue;
+        }
 
         // ГЛАВНОЕ УСЛОВИЕ: проверяем потраченный бюджет
-        // Правило срабатывает только если потрачено >= minSpent
-        if (spent < minSpent) continue;
+        if (spent < minSpent) {
+          skippedLowSpent++;
+          continue;
+        }
 
         // Вычисляем метрику для проверки
         let metricValue: number;
-        const threshold = Number(rule.threshold);
-
-        // Получаем результаты из VK (лиды/конверсии)
-        const baseAny = base as any;
-        const vkData = baseAny.vk || {};
-        const goals = vkData.goals || baseAny.goals || 0;
-        const clicks = baseAny.clicks || 0;
-        const shows = baseAny.shows || 0;
 
         switch (rule.metricType) {
           case 'clicks':
-            // Количество кликов
             metricValue = clicks;
             break;
           case 'goals':
-            // Количество результатов/лидов
             metricValue = goals;
             break;
           case 'ctr':
-            // CTR = (clicks / shows) * 100
             metricValue = shows > 0 ? (clicks / shows) * 100 : 0;
             break;
           case 'cpl':
-            // CPL = spent / goals (цена за результат)
-            // Если результатов 0, то CPL бесконечно большой - устанавливаем очень большое значение
             metricValue = goals > 0 ? spent / goals : 999999;
             break;
           default:
@@ -325,7 +352,7 @@ export class AutoDisableService {
         if (shouldDisable) {
           const bannerName = (banner as any).name || `Баннер ${banner.id}`;
           this.logger.log(
-            `Отключение объявления ${banner.id} (${bannerName}): потрачено ${spent.toFixed(2)}₽ >= ${minSpent}₽, ${rule.metricType}=${metricValue} ${rule.operator} ${threshold}`,
+            `🔴 Отключение объявления ${banner.id} (${bannerName}): spent=${spent.toFixed(2)}₽, ${rule.metricType}=${metricValue.toFixed(2)} ${rule.operator} ${threshold}`,
           );
 
           try {
@@ -342,8 +369,14 @@ export class AutoDisableService {
           } catch (error) {
             this.logger.error(`Ошибка отключения баннера ${banner.id}: ${error.message}`);
           }
+        } else {
+          skippedConditionNotMet++;
         }
       }
+
+      this.logger.log(
+        `📊 Итог: отключено ${result.adsDisabled}, пропущено: нет статистики=${skippedNoStats}, мало потрачено=${skippedLowSpent}, условие не выполнено=${skippedConditionNotMet}`,
+      );
 
       // Отправляем уведомление в Telegram
       if (rule.vkAccount.telegramChatId && result.adsDisabled > 0) {
