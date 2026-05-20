@@ -19,6 +19,8 @@ import { SegmentationModule } from './modules/segmentation/segmentation.module';
 import { LeadsTechModule } from './modules/leadstech/leadstech.module';
 import { ProfitabilityModule } from './modules/profitability/profitability.module';
 import { CreativesModule } from './modules/creatives/creatives.module';
+import { AiInventoryModule } from './modules/ai-inventory/ai-inventory.module';
+import { AiLaunchModule } from './modules/ai-launch/ai-launch.module';
 
 @Module({
   imports: [
@@ -45,6 +47,8 @@ import { CreativesModule } from './modules/creatives/creatives.module';
     LeadsTechModule,
     ProfitabilityModule,
     CreativesModule,
+    AiInventoryModule,
+    AiLaunchModule,
   ],
 })
 export class AppModule {}

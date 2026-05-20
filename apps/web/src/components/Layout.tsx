@@ -23,7 +23,8 @@ import {
   X,
   Layers,
   TrendingUp,
-  Image
+  Image,
+  Sparkles
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '@/contexts/AuthContext'
@@ -33,6 +34,7 @@ import api from '@/lib/api'
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+  { name: 'AI Quick-Launch', href: '/ai-launch', icon: Sparkles },
   { name: 'Прибыльность', href: '/profitability', icon: TrendingUp },
   { name: 'Правила', href: '/rules', icon: Play },
   { name: 'Автоотключение', href: '/auto-disable', icon: Power },

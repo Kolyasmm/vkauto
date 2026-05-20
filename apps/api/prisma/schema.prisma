@@ -320,6 +320,249 @@ model VkCreativeCache {
   @@map("vk_creative_cache")
 }
 
+// ============================================================
+// AI Inventory Index (новый слой, ничего из старого не ломает)
+// ============================================================
+// Все таблицы префикс ai_, изолированы от существующей схемы.
+// Заполняется sync-job'ом из VK Ads API. Используется будущим
+// AI Quick-Launch для сборки кампаний из реального опыта кабинета.
+
+model AiAdPlanIndex {
+  id              Int      @id @default(autoincrement())
+  vkAccountId     Int      @map("vk_account_id")
+  vkAdPlanId      BigInt   @map("vk_ad_plan_id")
+  name            String?
+  objective       String?
+  adObjectType    String?  @map("ad_object_type")
+  adObjectId      BigInt?  @map("ad_object_id")
+  status          String?
+  budgetLimit     Decimal? @map("budget_limit") @db.Decimal(14, 2)
+  budgetLimitDay  Decimal? @map("budget_limit_day") @db.Decimal(14, 2)
+  raw             Json?
+  syncedAt        DateTime @default(now()) @map("synced_at")
+
+  @@unique([vkAccountId, vkAdPlanId])
+  @@index([vkAccountId, objective])
+  @@map("ai_ad_plan_index")
+}
+
+model AiAdGroupIndex {
+  id              Int      @id @default(autoincrement())
+  vkAccountId     Int      @map("vk_account_id")
+  vkAdGroupId     BigInt   @map("vk_ad_group_id")
+  vkAdPlanId      BigInt?  @map("vk_ad_plan_id")
+  name            String?
+  status          String?
+  packageId       Int?     @map("package_id")
+  objective       String?
+  targetings      Json?
+  budget          Decimal? @db.Decimal(14, 2)
+  maxPrice        Decimal? @map("max_price") @db.Decimal(14, 2)
+  raw             Json?
+  syncedAt        DateTime @default(now()) @map("synced_at")
+
+  @@unique([vkAccountId, vkAdGroupId])
+  @@index([vkAccountId, packageId])
+  @@index([vkAccountId, objective])
+  @@map("ai_ad_group_index")
+}
+
+model AiBannerIndex {
+  id                Int      @id @default(autoincrement())
+  vkAccountId       Int      @map("vk_account_id")
+  vkBannerId        BigInt   @map("vk_banner_id")
+  vkAdGroupId       BigInt?  @map("vk_ad_group_id")
+  status            String?
+  moderationStatus  String?  @map("moderation_status")
+  delivery          String?
+  content           Json?
+  textblocks        Json?
+  urls              Json?
+  raw               Json?
+  syncedAt          DateTime @default(now()) @map("synced_at")
+
+  @@unique([vkAccountId, vkBannerId])
+  @@index([vkAccountId, moderationStatus])
+  @@map("ai_banner_index")
+}
+
+// Атомы текстов из существующих баннеров (для AI-выбора).
+// НЕ путать с AdText (пользовательские пресеты), это другое.
+model AiTextAtom {
+  id              Int      @id @default(autoincrement())
+  vkAccountId     Int      @map("vk_account_id")
+  role            String
+  body            String   @db.Text
+  cta             String?
+  bodyHash        String   @map("body_hash")
+  sourceBannerId  BigInt?  @map("source_banner_id")
+  usageCount      Int      @default(1) @map("usage_count")
+  tags            String[] @default([])
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@unique([vkAccountId, role, bodyHash])
+  @@index([vkAccountId, role])
+  @@map("ai_text_atoms")
+}
+
+// Индекс уже загруженных в VK креативов (отдельно от локальной Creative).
+model AiCreativeAsset {
+  id              Int      @id @default(autoincrement())
+  vkAccountId     Int      @map("vk_account_id")
+  vkContentId     BigInt   @map("vk_content_id")
+  type            String
+  contentKey      String   @map("content_key")
+  previewUrl      String?  @map("preview_url") @db.Text
+  width           Int?
+  height          Int?
+  usageCount      Int      @default(1) @map("usage_count")
+  tags            String[] @default([])
+  raw             Json?
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@unique([vkAccountId, vkContentId])
+  @@index([vkAccountId, contentKey])
+  @@map("ai_creative_assets")
+}
+
+// Сообщества VK / URL-объекты, которые продвигались.
+model AiCommunityRef {
+  id              Int      @id @default(autoincrement())
+  vkAccountId     Int      @map("vk_account_id")
+  vkUrlId         BigInt   @map("vk_url_id")
+  url             String   @db.Text
+  urlType         String   @map("url_type")
+  groupShortname  String?  @map("group_shortname")
+  usageCount      Int      @default(1) @map("usage_count")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@unique([vkAccountId, vkUrlId])
+  @@index([vkAccountId, urlType])
+  @@map("ai_community_refs")
+}
+
+// Профили таргетинга (нормализованный набор: geo+age+sex+segments+interests).
+model AiAudienceProfile {
+  id              Int      @id @default(autoincrement())
+  vkAccountId     Int      @map("vk_account_id")
+  profileHash     String   @map("profile_hash")
+  profile         Json
+  usageCount      Int      @default(1) @map("usage_count")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@unique([vkAccountId, profileHash])
+  @@map("ai_audience_profiles")
+}
+
+model AiLeadForm {
+  id              Int      @id @default(autoincrement())
+  vkAccountId     Int      @map("vk_account_id")
+  vkLeadFormId    BigInt   @map("vk_lead_form_id")
+  name            String?
+  leadsCount      Int      @default(0) @map("leads_count")
+  raw             Json?
+  syncedAt        DateTime @default(now()) @map("synced_at")
+
+  @@unique([vkAccountId, vkLeadFormId])
+  @@map("ai_lead_forms")
+}
+
+model AiMobileApp {
+  id              Int      @id @default(autoincrement())
+  vkAccountId     Int      @map("vk_account_id")
+  vkMobileAppId   BigInt   @map("vk_mobile_app_id")
+  platform        String?
+  name            String?
+  storeUrl        String?  @map("store_url")
+  categoryId      Int?     @map("category_id")
+  raw             Json?
+  syncedAt        DateTime @default(now()) @map("synced_at")
+
+  @@unique([vkAccountId, vkMobileAppId])
+  @@map("ai_mobile_apps")
+}
+
+model AiPackage {
+  id              Int      @id @default(autoincrement())
+  vkAccountId     Int      @map("vk_account_id")
+  vkPackageId     Int      @map("vk_package_id")
+  objective       String?
+  subObjective    String?  @map("sub_objective")
+  name            String?
+  raw             Json?
+  syncedAt        DateTime @default(now()) @map("synced_at")
+
+  @@unique([vkAccountId, vkPackageId])
+  @@index([vkAccountId, objective])
+  @@map("ai_packages")
+}
+
+model AiBannerPattern {
+  id              Int      @id @default(autoincrement())
+  vkAccountId     Int      @map("vk_account_id")
+  patternName     String   @map("pattern_name")
+  raw             Json
+  fetchedAt       DateTime @default(now()) @map("fetched_at")
+
+  @@unique([vkAccountId, patternName])
+  @@map("ai_banner_patterns")
+}
+
+model AiPerformanceVerdict {
+  id              Int      @id @default(autoincrement())
+  vkAccountId     Int      @map("vk_account_id")
+  level           String
+  vkObjectId      BigInt   @map("vk_object_id")
+  verdict         String
+  score           Decimal? @db.Decimal(8, 4)
+  criteria        Json?
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([vkAccountId, level, verdict])
+  @@map("ai_performance_verdicts")
+}
+
+model AiLaunchRun {
+  id                Int       @id @default(autoincrement())
+  userId            Int       @map("user_id")
+  vkAccountId       Int       @map("vk_account_id")
+  strategy          String
+  objective         String
+  inputParams       Json      @map("input_params")
+  selection         Json?
+  resultCampaignId  BigInt?   @map("result_campaign_id")
+  resultAdGroupIds  BigInt[]  @default([]) @map("result_ad_group_ids")
+  resultBannerIds   BigInt[]  @default([]) @map("result_banner_ids")
+  status            String    @default("pending")
+  errorMessage      String?   @map("error_message")
+  durationMs        Int?      @map("duration_ms")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  completedAt       DateTime? @map("completed_at")
+
+  @@index([userId, vkAccountId])
+  @@index([vkAccountId, status])
+  @@map("ai_launch_runs")
+}
+
+model AiInventorySync {
+  id              Int       @id @default(autoincrement())
+  vkAccountId     Int       @map("vk_account_id")
+  status          String    @default("pending")
+  progress        Int       @default(0)
+  stats           Json?
+  errorMessage    String?   @map("error_message")
+  startedAt       DateTime  @default(now()) @map("started_at")
+  completedAt     DateTime? @map("completed_at")
+
+  @@index([vkAccountId, status])
+  @@map("ai_inventory_syncs")
+}
+
+// ============================================================
+// /AI Inventory Index
+// ============================================================
+
 // Задачи ручного масштабирования групп объявлений
 model ScalingTask {
   id              Int            @id @default(autoincrement())
