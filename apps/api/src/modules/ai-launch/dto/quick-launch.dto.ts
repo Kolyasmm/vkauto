@@ -1,4 +1,4 @@
-import { IsEnum, IsNumber, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { IsEnum, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 
 export enum AiLaunchObjective {
   MESSAGES = 'socialactivity',
@@ -19,6 +19,13 @@ export class QuickLaunchDto {
   @IsNumber()
   @Min(100)
   dailyBudget?: number;
+
+  // Сколько креативов → столько групп объявлений (1 креатив = 1 группа)
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(10)
+  creativesCount?: number;
 
   @IsOptional()
   @IsString()

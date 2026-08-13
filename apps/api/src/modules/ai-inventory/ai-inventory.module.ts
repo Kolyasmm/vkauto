@@ -4,11 +4,12 @@ import { AuthModule } from '../auth/auth.module';
 import { AiInventoryController } from './ai-inventory.controller';
 import { AiInventoryService } from './ai-inventory.service';
 import { InventorySyncService } from './sync/inventory-sync.service';
+import { VerdictsService } from './verdicts/verdicts.service';
 
 @Module({
   imports: [PrismaModule, AuthModule],
   controllers: [AiInventoryController],
-  providers: [AiInventoryService, InventorySyncService],
-  exports: [AiInventoryService, InventorySyncService],
+  providers: [AiInventoryService, InventorySyncService, VerdictsService],
+  exports: [AiInventoryService, InventorySyncService, VerdictsService],
 })
 export class AiInventoryModule {}

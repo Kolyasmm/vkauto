@@ -34,9 +34,10 @@ export class AiLaunchService {
     }
 
     const strategy = dto.strategy ?? 'popularity_v1';
-    const campaignName =
-      dto.campaignName ?? `AI ${dto.objective} ${this.formatDate(new Date())}`;
+    const baseName = dto.campaignName?.trim() || `${dto.objective} ${this.formatDate(new Date())}`;
+    const campaignName = /\bAI\b/i.test(baseName) ? baseName : `${baseName} AI`;
     const dailyBudget = dto.dailyBudget ?? 200;
+    const creativesCount = Math.max(1, Math.min(10, dto.creativesCount ?? 1));
 
     const run = await this.prisma.aiLaunchRun.create({
       data: {
@@ -44,14 +45,14 @@ export class AiLaunchService {
         vkAccountId,
         strategy,
         objective: dto.objective,
-        inputParams: { campaignName, dailyBudget } as Prisma.InputJsonValue,
+        inputParams: { campaignName, dailyBudget, creativesCount } as Prisma.InputJsonValue,
         status: 'pending',
       },
     });
 
     const t0 = Date.now();
     try {
-      const selection = await this.pickSelection(vkAccountId, dto.objective);
+      const selection = await this.pickSelection(vkAccountId, dto.objective, creativesCount);
       await this.prisma.aiLaunchRun.update({
         where: { id: run.id },
         data: { selection: this.serializeSelection(selection) as Prisma.InputJsonValue, status: 'running' },
@@ -143,14 +144,18 @@ export class AiLaunchService {
 
   // ---- helpers ---------------------------------------------------------
 
-  private async pickSelection(vkAccountId: number, objective: AiLaunchObjective): Promise<PickedSelection> {
+  private async pickSelection(
+    vkAccountId: number,
+    objective: AiLaunchObjective,
+    creativesCount: number,
+  ): Promise<PickedSelection> {
     switch (objective) {
       case AiLaunchObjective.MESSAGES:
-        return this.picker.pickForMessages(vkAccountId);
+        return this.picker.pickForMessages(vkAccountId, creativesCount);
       case AiLaunchObjective.LEAD_FORM:
-        return this.picker.pickForLeadForm(vkAccountId);
+        return this.picker.pickForLeadForm(vkAccountId, creativesCount);
       case AiLaunchObjective.APP_INSTALLS:
-        return this.picker.pickForAppInstalls(vkAccountId);
+        return this.picker.pickForAppInstalls(vkAccountId, creativesCount);
       default:
         throw new BadRequestException(`Неизвестный objective: ${objective}`);
     }

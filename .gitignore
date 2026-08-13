@@ -1,7 +1,17 @@
 node_modules/
 .next/
 dist/
-.env
-*.env.local
 .DS_Store
 *.log
+*.tsbuildinfo
+
+# Секреты: игнорируем все env-файлы, кроме шаблона
+.env
+.env.*
+!.env.example
+server.env
+
+# Дампы БД и загрузки пользователей
+backups/
+uploads/
+ssl/

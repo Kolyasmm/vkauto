@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import * as crypto from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VkInventoryClient } from '../vk-inventory-client';
+import { VerdictsService } from '../verdicts/verdicts.service';
 
 export interface SyncStats {
   adPlans: number;
@@ -15,6 +16,11 @@ export interface SyncStats {
   leadForms: number;
   mobileApps: number;
   packages: number;
+  bannerStats?: number;
+  textVerdicts?: number;
+  creativeVerdicts?: number;
+  audienceVerdicts?: number;
+  cabinetAvgCpl?: number | null;
 }
 
 const EMPTY_STATS = (): SyncStats => ({
@@ -34,7 +40,10 @@ const EMPTY_STATS = (): SyncStats => ({
 export class InventorySyncService {
   private readonly logger = new Logger(InventorySyncService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly verdicts: VerdictsService,
+  ) {}
 
   async startSync(vkAccountId: number): Promise<{ id: number; status: string }> {
     const account = await this.prisma.vkAccount.findUnique({
@@ -78,7 +87,10 @@ export class InventorySyncService {
     return sync;
   }
 
-  async getInventoryStats(vkAccountId: number): Promise<SyncStats> {
+  async getInventoryStats(vkAccountId: number): Promise<SyncStats & {
+    winners: { texts: number; creatives: number; audiences: number };
+    losers: { texts: number; creatives: number; audiences: number };
+  }> {
     const [
       adPlans,
       adGroups,
@@ -90,6 +102,7 @@ export class InventorySyncService {
       leadForms,
       mobileApps,
       packages,
+      bannerStats,
     ] = await Promise.all([
       this.prisma.aiAdPlanIndex.count({ where: { vkAccountId } }),
       this.prisma.aiAdGroupIndex.count({ where: { vkAccountId } }),
@@ -101,7 +114,17 @@ export class InventorySyncService {
       this.prisma.aiLeadForm.count({ where: { vkAccountId } }),
       this.prisma.aiMobileApp.count({ where: { vkAccountId } }),
       this.prisma.aiPackage.count({ where: { vkAccountId } }),
+      this.prisma.aiBannerStats.count({ where: { vkAccountId } }),
     ]);
+
+    const verdicts = await this.prisma.aiPerformanceVerdict.groupBy({
+      by: ['level', 'verdict'],
+      where: { vkAccountId },
+      _count: { _all: true },
+    });
+    const countByLevelVerdict = (lvl: string, v: string) =>
+      verdicts.find((x) => x.level === lvl && x.verdict === v)?._count._all ?? 0;
+
     return {
       adPlans,
       adGroups,
@@ -113,6 +136,17 @@ export class InventorySyncService {
       leadForms,
       mobileApps,
       packages,
+      bannerStats,
+      winners: {
+        texts: countByLevelVerdict('text_atom', 'winner'),
+        creatives: countByLevelVerdict('creative_asset', 'winner'),
+        audiences: countByLevelVerdict('audience_profile', 'winner'),
+      },
+      losers: {
+        texts: countByLevelVerdict('text_atom', 'loser'),
+        creatives: countByLevelVerdict('creative_asset', 'loser'),
+        audiences: countByLevelVerdict('audience_profile', 'loser'),
+      },
     };
   }
 
@@ -143,8 +177,21 @@ export class InventorySyncService {
       await this.tick(syncId, 85);
       stats.leadForms = await this.syncLeadForms(client, vkAccountId);
 
-      await this.tick(syncId, 95);
+      await this.tick(syncId, 92);
       stats.mobileApps = await this.syncMobileApps(client, vkAccountId);
+
+      await this.tick(syncId, 93);
+      await this.syncLabels(client, vkAccountId);
+
+      await this.tick(syncId, 96);
+      stats.bannerStats = await this.syncBannerStats(client, vkAccountId, 30);
+
+      await this.tick(syncId, 98);
+      const v = await this.verdicts.recomputeAll(vkAccountId, 30);
+      stats.textVerdicts = v.texts;
+      stats.creativeVerdicts = v.creatives;
+      stats.audienceVerdicts = v.audiences;
+      stats.cabinetAvgCpl = v.cabinetAvgCpl;
 
       await this.prisma.aiInventorySync.update({
         where: { id: syncId },
@@ -211,15 +258,21 @@ export class InventorySyncService {
 
   private async syncAdPlans(client: VkInventoryClient, vkAccountId: number): Promise<number> {
     const items = await client.adPlans();
+    let written = 0;
     for (const p of items) {
-      const vkAdPlanId = BigInt(p.id);
+      const vkAdPlanId = this.safeBigInt(p.id);
+      if (vkAdPlanId === null) {
+        this.logger.warn(`Skip ad_plan: non-numeric id=${JSON.stringify(p.id)}`);
+        continue;
+      }
+      const adObjectId = this.safeBigInt(p.ad_object_id);
       await this.prisma.aiAdPlanIndex.upsert({
         where: { vkAccountId_vkAdPlanId: { vkAccountId, vkAdPlanId } },
         update: {
           name: p.name ?? null,
           objective: p.objective ?? null,
           adObjectType: p.ad_object_type ?? null,
-          adObjectId: p.ad_object_id ? BigInt(p.ad_object_id) : null,
+          adObjectId,
           status: p.status ?? null,
           budgetLimit: this.toDecimal(p.budget_limit),
           budgetLimitDay: this.toDecimal(p.budget_limit_day),
@@ -232,15 +285,16 @@ export class InventorySyncService {
           name: p.name ?? null,
           objective: p.objective ?? null,
           adObjectType: p.ad_object_type ?? null,
-          adObjectId: p.ad_object_id ? BigInt(p.ad_object_id) : null,
+          adObjectId,
           status: p.status ?? null,
           budgetLimit: this.toDecimal(p.budget_limit),
           budgetLimitDay: this.toDecimal(p.budget_limit_day),
           raw: p as Prisma.InputJsonValue,
         },
       });
+      written++;
     }
-    return items.length;
+    return written;
   }
 
   private async syncAdGroups(
@@ -251,11 +305,16 @@ export class InventorySyncService {
     const profileSeen = new Map<string, any>();
 
     for (const g of items) {
-      const vkAdGroupId = BigInt(g.id);
+      const vkAdGroupId = this.safeBigInt(g.id);
+      if (vkAdGroupId === null) {
+        this.logger.warn(`Skip ad_group: non-numeric id=${JSON.stringify(g.id)}`);
+        continue;
+      }
+      const vkAdPlanId = this.safeBigInt(g.ad_plan_id);
       await this.prisma.aiAdGroupIndex.upsert({
         where: { vkAccountId_vkAdGroupId: { vkAccountId, vkAdGroupId } },
         update: {
-          vkAdPlanId: g.ad_plan_id ? BigInt(g.ad_plan_id) : null,
+          vkAdPlanId,
           name: g.name ?? null,
           status: g.status ?? null,
           packageId: g.package_id ?? null,
@@ -269,7 +328,7 @@ export class InventorySyncService {
         create: {
           vkAccountId,
           vkAdGroupId,
-          vkAdPlanId: g.ad_plan_id ? BigInt(g.ad_plan_id) : null,
+          vkAdPlanId,
           name: g.name ?? null,
           status: g.status ?? null,
           packageId: g.package_id ?? null,
@@ -316,12 +375,17 @@ export class InventorySyncService {
     const communityUrlIds = new Set<bigint>();
 
     for (const b of items) {
-      const vkBannerId = BigInt(b.id);
+      const vkBannerId = this.safeBigInt(b.id);
+      if (vkBannerId === null) {
+        this.logger.warn(`Skip banner: non-numeric id=${JSON.stringify(b.id)}`);
+        continue;
+      }
+      const vkAdGroupId = this.safeBigInt(b.ad_group_id);
 
       await this.prisma.aiBannerIndex.upsert({
         where: { vkAccountId_vkBannerId: { vkAccountId, vkBannerId } },
         update: {
-          vkAdGroupId: b.ad_group_id ? BigInt(b.ad_group_id) : null,
+          vkAdGroupId,
           status: b.status ?? null,
           moderationStatus: b.moderation_status ?? null,
           delivery: b.delivery ?? null,
@@ -334,7 +398,7 @@ export class InventorySyncService {
         create: {
           vkAccountId,
           vkBannerId,
-          vkAdGroupId: b.ad_group_id ? BigInt(b.ad_group_id) : null,
+          vkAdGroupId,
           status: b.status ?? null,
           moderationStatus: b.moderation_status ?? null,
           delivery: b.delivery ?? null,
@@ -381,7 +445,8 @@ export class InventorySyncService {
       if (b.content && typeof b.content === 'object') {
         for (const [contentKey, raw] of Object.entries<any>(b.content)) {
           if (!raw || typeof raw !== 'object' || !raw.id) continue;
-          const vkContentId = BigInt(raw.id);
+          const vkContentId = this.safeBigInt(raw.id);
+          if (vkContentId === null) continue;
           if (creativeAssetIds.has(vkContentId)) {
             await this.prisma.aiCreativeAsset.update({
               where: { vkAccountId_vkContentId: { vkAccountId, vkContentId } },
@@ -419,9 +484,8 @@ export class InventorySyncService {
       if (b.urls && typeof b.urls === 'object') {
         for (const slot of Object.values<any>(b.urls)) {
           if (!slot || typeof slot !== 'object') continue;
-          const vkUrlId =
-            slot.id != null ? BigInt(slot.id) : slot.url_object_id != null ? BigInt(slot.url_object_id) : null;
-          if (vkUrlId == null) continue;
+          const vkUrlId = this.safeBigInt(slot.id) ?? this.safeBigInt(slot.url_object_id);
+          if (vkUrlId === null) continue;
           const url = slot.url || '';
           const urlTypes: string[] = Array.isArray(slot.url_types) ? slot.url_types : [];
           const urlType = urlTypes[0] || slot.type || 'unknown';
@@ -459,8 +523,13 @@ export class InventorySyncService {
 
   private async syncLeadForms(client: VkInventoryClient, vkAccountId: number): Promise<number> {
     const items = await client.leadForms().catch(() => [] as any[]);
+    let written = 0;
     for (const f of items) {
-      const vkLeadFormId = BigInt(f.id);
+      const vkLeadFormId = this.safeBigInt(f.id);
+      if (vkLeadFormId === null) {
+        this.logger.warn(`Skip lead_form: non-numeric id=${JSON.stringify(f.id)}`);
+        continue;
+      }
       await this.prisma.aiLeadForm.upsert({
         where: { vkAccountId_vkLeadFormId: { vkAccountId, vkLeadFormId } },
         update: {
@@ -477,15 +546,23 @@ export class InventorySyncService {
           raw: f as Prisma.InputJsonValue,
         },
       });
+      written++;
     }
-    return items.length;
+    return written;
   }
 
   private async syncMobileApps(client: VkInventoryClient, vkAccountId: number): Promise<number> {
     const items = await client.mobileApps().catch(() => [] as any[]);
+    let written = 0;
     for (const a of items) {
-      const vkMobileAppId = BigInt(a.id ?? a.rb_mobile_app_id ?? 0);
-      if (vkMobileAppId === 0n) continue;
+      // RuStore apps имеют id = bundle string ("rustore.com.app.zaim") — пропускаем,
+      // в схеме vk_mobile_app_id хранится как BigInt. Если когда-нибудь надо учитывать
+      // RuStore — нужно менять схему на String или добавлять отдельное поле bundle_id.
+      const vkMobileAppId = this.safeBigInt(a.rb_mobile_app_id) ?? this.safeBigInt(a.id);
+      if (vkMobileAppId === null) {
+        this.logger.warn(`Skip mobile_app: non-numeric id (likely RuStore bundle) id=${JSON.stringify(a.id)}`);
+        continue;
+      }
       await this.prisma.aiMobileApp.upsert({
         where: { vkAccountId_vkMobileAppId: { vkAccountId, vkMobileAppId } },
         update: {
@@ -506,8 +583,128 @@ export class InventorySyncService {
           raw: a as Prisma.InputJsonValue,
         },
       });
+      written++;
     }
-    return items.length;
+    return written;
+  }
+
+  // Тянет статистику по баннерам за periodDays. Только для баннеров которые
+  // у нас в ai_banner_index (т.е. не для всех 8660 а тех что в инвентаре).
+  private async syncBannerStats(
+    client: VkInventoryClient,
+    vkAccountId: number,
+    periodDays: number,
+  ): Promise<number> {
+    const banners = await this.prisma.aiBannerIndex.findMany({
+      where: { vkAccountId },
+      select: { vkBannerId: true },
+    });
+    if (banners.length === 0) return 0;
+
+    const dateTo = new Date();
+    const dateFrom = new Date();
+    dateFrom.setDate(dateFrom.getDate() - periodDays);
+    const dateFromStr = dateFrom.toISOString().slice(0, 10);
+    const dateToStr = dateTo.toISOString().slice(0, 10);
+
+    const items = await client.bannerStats(
+      banners.map((b) => b.vkBannerId),
+      dateFromStr,
+      dateToStr,
+    );
+
+    let written = 0;
+    for (const it of items) {
+      const vkBannerId = this.safeBigInt(it.id);
+      if (vkBannerId === null) continue;
+      const base = it.total?.base ?? {};
+      const spent = parseFloat(String(base.spent ?? 0));
+      const shows = Number(base.shows ?? 0);
+      const clicks = Number(base.clicks ?? 0);
+      const goals = Number(base.goals ?? 0);
+      const cpl = goals > 0 ? spent / goals : null;
+      const ctr = shows > 0 ? clicks / shows : null;
+
+      await this.prisma.aiBannerStats.upsert({
+        where: { vkAccountId_vkBannerId_periodDays: { vkAccountId, vkBannerId, periodDays } },
+        update: {
+          dateFrom: new Date(dateFromStr),
+          dateTo: new Date(dateToStr),
+          spent: new Prisma.Decimal(spent),
+          shows,
+          clicks,
+          goals,
+          cpl: cpl != null ? new Prisma.Decimal(cpl) : null,
+          ctr: ctr != null ? new Prisma.Decimal(ctr) : null,
+          raw: it as Prisma.InputJsonValue,
+          syncedAt: new Date(),
+        },
+        create: {
+          vkAccountId,
+          vkBannerId,
+          periodDays,
+          dateFrom: new Date(dateFromStr),
+          dateTo: new Date(dateToStr),
+          spent: new Prisma.Decimal(spent),
+          shows,
+          clicks,
+          goals,
+          cpl: cpl != null ? new Prisma.Decimal(cpl) : null,
+          ctr: ctr != null ? new Prisma.Decimal(ctr) : null,
+          raw: it as Prisma.InputJsonValue,
+        },
+      });
+      written++;
+    }
+    return written;
+  }
+
+  // Подтягивает названия сегментов / интересов из VK API и складывает в
+  // SegmentLabel / InterestLabel (если у пользователя нет собственного имени).
+  // Использует upsert — не затирает уже введённые пользователем имена кроме
+  // случая когда у нас в БД дефолтное "сегмент {id}" / "интерес {id}".
+  private async syncLabels(client: VkInventoryClient, vkAccountId: number): Promise<void> {
+    const [segments, interests, socDem] = await Promise.all([
+      client.remarketingSegments().catch(() => [] as any[]),
+      client.interestsTree().catch(() => [] as any[]),
+      client.interestsSocDemTree().catch(() => [] as any[]),
+    ]);
+
+    for (const s of segments) {
+      const segmentId = this.safeBigInt(s.id);
+      if (segmentId === null) continue;
+      const name = String(s.name || '').trim() || `Сегмент ${s.id}`;
+      // upsert с пустым update — не перезаписываем ручные метки пользователя
+      await this.prisma.segmentLabel.upsert({
+        where: { vkAccountId_segmentId: { vkAccountId, segmentId } },
+        update: {},
+        create: { vkAccountId, segmentId, name },
+      });
+    }
+
+    const flat: { id: number; name: string }[] = [];
+    const walk = (nodes: any[], path: string[] = []) => {
+      for (const n of nodes || []) {
+        const id = Number(n.id);
+        const name = String(n.name || '').trim();
+        if (Number.isFinite(id) && name) {
+          flat.push({ id, name: [...path, name].join(' > ') });
+        }
+        if (Array.isArray(n.children) && n.children.length) {
+          walk(n.children, name ? [...path, name] : path);
+        }
+      }
+    };
+    walk(interests);
+    walk(socDem);
+
+    for (const { id, name } of flat) {
+      await this.prisma.interestLabel.upsert({
+        where: { vkAccountId_interestId: { vkAccountId, interestId: id } },
+        update: {},
+        create: { vkAccountId, interestId: id, name },
+      });
+    }
   }
 
   // ---- helpers ---------------------------------------------------------
@@ -527,6 +724,21 @@ export class InventorySyncService {
     const n = typeof v === 'number' ? v : parseFloat(String(v));
     if (!Number.isFinite(n)) return null;
     return new Prisma.Decimal(n);
+  }
+
+  // Безопасный BigInt: возвращает null если значение не целое число.
+  // Защита от RuStore bundle-ids ("rustore.com.app.zaim") и подобных string-id.
+  private safeBigInt(v: any): bigint | null {
+    if (v == null) return null;
+    if (typeof v === 'bigint') return v;
+    if (typeof v === 'number') return Number.isFinite(v) ? BigInt(Math.trunc(v)) : null;
+    const s = String(v).trim();
+    if (!/^-?\d+$/.test(s)) return null;
+    try {
+      return BigInt(s);
+    } catch {
+      return null;
+    }
   }
 
   private sha1(s: string): string {

@@ -1,7 +1,8 @@
 // Prisma Schema для VK Automation Platform
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {
@@ -507,6 +508,28 @@ model AiBannerPattern {
 
   @@unique([vkAccountId, patternName])
   @@map("ai_banner_patterns")
+}
+
+// Сырая стата по баннерам из VK за период (для recompute verdicts без повторного дёрганья API)
+model AiBannerStats {
+  id            Int      @id @default(autoincrement())
+  vkAccountId   Int      @map("vk_account_id")
+  vkBannerId    BigInt   @map("vk_banner_id")
+  periodDays    Int      @map("period_days")
+  dateFrom      DateTime @map("date_from") @db.Date
+  dateTo        DateTime @map("date_to") @db.Date
+  spent         Decimal  @db.Decimal(14, 2)
+  shows         Int      @default(0)
+  clicks        Int      @default(0)
+  goals         Int      @default(0)
+  cpl           Decimal? @db.Decimal(10, 2)
+  ctr           Decimal? @db.Decimal(6, 4)
+  raw           Json?
+  syncedAt      DateTime @default(now()) @map("synced_at")
+
+  @@unique([vkAccountId, vkBannerId, periodDays])
+  @@index([vkAccountId, periodDays])
+  @@map("ai_banner_stats")
 }
 
 model AiPerformanceVerdict {

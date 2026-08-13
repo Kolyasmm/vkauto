@@ -30,6 +30,10 @@ interface InventoryStats {
   leadForms: number
   mobileApps: number
   packages: number
+  bannerStats?: number
+  cabinetAvgCpl?: number | null
+  winners?: { texts: number; creatives: number; audiences: number }
+  losers?: { texts: number; creatives: number; audiences: number }
 }
 
 interface InventorySync {
@@ -84,6 +88,7 @@ export default function AiLaunchPage() {
   const [objective, setObjective] = useState<Objective>('socialactivity')
   const [campaignName, setCampaignName] = useState('')
   const [dailyBudget, setDailyBudget] = useState(200)
+  const [creativesCount, setCreativesCount] = useState(3)
   const [lastResult, setLastResult] = useState<any>(null)
   const [lastError, setLastError] = useState<string | null>(null)
 
@@ -128,7 +133,7 @@ export default function AiLaunchPage() {
     mutationFn: async () => {
       setLastError(null)
       setLastResult(null)
-      const body: any = { objective, dailyBudget }
+      const body: any = { objective, dailyBudget, creativesCount }
       if (campaignName.trim()) body.campaignName = campaignName.trim()
       return (await api.post(`/ai-launch/${accountId}`, body)).data
     },
@@ -211,6 +216,23 @@ export default function AiLaunchPage() {
                 </button>
               </div>
 
+              {stats?.winners && stats?.losers && (stats.bannerStats || 0) > 0 && (
+                <div className="mt-4 pt-4 border-t border-gray-100">
+                  <div className="text-xs text-gray-500 mb-2">
+                    Вердикты ИИ (по статистике за 30 дней
+                    {stats.cabinetAvgCpl ? `, средний CPL по кабинету ${stats.cabinetAvgCpl.toFixed(0)}₽` : ''}):
+                  </div>
+                  <div className="grid grid-cols-3 gap-3 text-sm">
+                    <Verdict label="Тексты" winner={stats.winners.texts} loser={stats.losers.texts} />
+                    <Verdict label="Креативы" winner={stats.winners.creatives} loser={stats.losers.creatives} />
+                    <Verdict label="Аудитории" winner={stats.winners.audiences} loser={stats.losers.audiences} />
+                  </div>
+                  <div className="text-[10px] text-gray-400 mt-2">
+                    ИИ повышает вес winner-ов в 5× и снижает loser-ов в 10×. Без verdict-а (мало данных) — нейтральный вес.
+                  </div>
+                </div>
+              )}
+
               {sync && (
                 <div className="mt-4 pt-4 border-t border-gray-100 text-sm">
                   <div className="flex items-center gap-2 text-gray-700">
@@ -260,16 +282,17 @@ export default function AiLaunchPage() {
                 })}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="text-xs text-gray-500 mb-1 block">Название кампании (опционально)</label>
                   <input
                     type="text"
                     value={campaignName}
                     onChange={(e) => setCampaignName(e.target.value)}
-                    placeholder={`AI ${objective}`}
+                    placeholder={`${objective}`}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-purple-500"
                   />
+                  <p className="text-[10px] text-gray-400 mt-1">К имени всегда добавится «AI» в конце</p>
                 </div>
                 <div>
                   <label className="text-xs text-gray-500 mb-1 block">Дневной бюджет, ₽ (мин. 100)</label>
@@ -280,6 +303,18 @@ export default function AiLaunchPage() {
                     onChange={(e) => setDailyBudget(Number(e.target.value))}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-purple-500"
                   />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Креативов (1-10)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={creativesCount}
+                    onChange={(e) => setCreativesCount(Math.max(1, Math.min(10, Number(e.target.value))))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-purple-500"
+                  />
+                  <p className="text-[10px] text-gray-400 mt-1">1 креатив = 1 группа объявлений</p>
                 </div>
               </div>
 
@@ -368,6 +403,18 @@ export default function AiLaunchPage() {
         )}
       </div>
     </Layout>
+  )
+}
+
+function Verdict({ label, winner, loser }: { label: string; winner: number; loser: number }) {
+  return (
+    <div className="bg-gray-50 rounded-md p-2">
+      <div className="text-xs text-gray-500 mb-1">{label}</div>
+      <div className="flex items-center gap-3 text-sm">
+        <span className="text-green-700 font-medium">✓ {winner}</span>
+        <span className="text-red-700 font-medium">✗ {loser}</span>
+      </div>
+    </div>
   )
 }
 
